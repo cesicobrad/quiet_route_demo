@@ -51,7 +51,7 @@ class AccessCatalog {
           type: AccessItemType.hardPermission,
           introducedIn: PrivacyPhase.phase1,
           title: 'Location (while using)',
-          shortDescription: 'Keeps the map centered gently.',
+          shortDescription: 'Keeps the map centered.',
         ),
         const AccessItem(
           id: AccessItemId.networkType,
@@ -72,14 +72,14 @@ class AccessCatalog {
           type: AccessItemType.softSignal,
           introducedIn: PrivacyPhase.phase1,
           title: 'Locale',
-          shortDescription: 'Keeps language soft and close.',
+          shortDescription: 'Keeps language clear and local.',
         ),
         const AccessItem(
           id: AccessItemId.timezone,
           type: AccessItemType.softSignal,
           introducedIn: PrivacyPhase.phase1,
           title: 'Time rhythm',
-          shortDescription: 'Understands your time of day gently.',
+          shortDescription: 'Understands your time of day.',
         ),
         const AccessItem(
           id: AccessItemId.sessionRhythm,
@@ -100,21 +100,21 @@ class AccessCatalog {
           type: AccessItemType.hardPermission,
           introducedIn: PrivacyPhase.phase2,
           title: 'Calm moments',
-          shortDescription: 'Saves gentle captures to your device.',
+          shortDescription: 'Saves calm captures to your device.',
         ),
         const AccessItem(
           id: AccessItemId.locationAlways,
           type: AccessItemType.hardPermission,
           introducedIn: PrivacyPhase.phase2,
           title: 'Location (always)',
-          shortDescription: 'Keeps paths soft even in the background.',
+          shortDescription: 'Keeps paths steady even in the background.',
         ),
         const AccessItem(
           id: AccessItemId.deviceOrientation,
           type: AccessItemType.softSignal,
           introducedIn: PrivacyPhase.phase2,
           title: 'Orientation shifts',
-          shortDescription: 'Notices gentle tilts.',
+          shortDescription: 'Notices small tilts.',
         ),
         const AccessItem(
           id: AccessItemId.accelerometer,
@@ -142,7 +142,7 @@ class AccessCatalog {
           type: AccessItemType.hardPermission,
           introducedIn: PrivacyPhase.phase3,
           title: 'Trusted people',
-          shortDescription: 'Lets you share peace plans softly.',
+          shortDescription: 'Lets you share peace plans.',
         ),
         const AccessItem(
           id: AccessItemId.motionFitness,
@@ -170,7 +170,7 @@ class AccessCatalog {
           type: AccessItemType.hardPermission,
           introducedIn: PrivacyPhase.phase4,
           title: 'Calm scan',
-          shortDescription: 'Sees softly when invited.',
+          shortDescription: 'Sees only when invited.',
         ),
         const AccessItem(
           id: AccessItemId.bluetooth,
@@ -198,7 +198,7 @@ class AccessCatalog {
           type: AccessItemType.softSignal,
           introducedIn: PrivacyPhase.phase4,
           title: 'Magnetometer',
-          shortDescription: 'Reads compass hush.',
+          shortDescription: 'Reads compass direction.',
         ),
         const AccessItem(
           id: AccessItemId.deviceInfo,

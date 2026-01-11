@@ -9,7 +9,7 @@ class PrivacyCopy {
       case PrivacyPhase.phase2:
         return 'Less effort, more calm';
       case PrivacyPhase.phase3:
-        return 'Gentle care';
+        return 'Steady care';
       case PrivacyPhase.phase4:
         return 'Tiny signals keep you safe';
       case PrivacyPhase.phase5:
@@ -22,11 +22,11 @@ class PrivacyCopy {
   static String rationaleBody(AccessItemId id, PrivacyPhase phase) {
     switch (id) {
       case AccessItemId.locationWhenInUse:
-        return 'We center the map softly while you explore. You can skip.';
+        return 'We center the map while you explore. You can skip.';
       case AccessItemId.locationAlways:
         return 'Background location keeps routes calm without you opening the app.';
       case AccessItemId.notifications:
-        return 'Allow light reminders so we can whisper gentle nudges only when needed.';
+        return 'Allow light reminders so we can share small nudges only when needed.';
       case AccessItemId.photosMedia:
         return 'Save serene captures locally. Nothing leaves your device.';
       case AccessItemId.calendar:
@@ -38,7 +38,7 @@ class PrivacyCopy {
       case AccessItemId.camera:
         return 'For calm scans you request. Images stay on your phone.';
       default:
-        return 'This keeps experiences tuned gently to you. Not now is always okay.';
+        return 'This keeps experiences tuned to you. Not now is always okay.';
     }
   }
 
@@ -60,6 +60,6 @@ class PrivacyCopy {
     if (phase == PrivacyPhase.phase6) {
       return 'Patterns emerge. Peace is easier when nothing is unknown.';
     }
-    return 'Gentle summaries stay on this device.';
+    return 'Calm summaries stay on this device.';
   }
 }
