@@ -5,14 +5,14 @@ import '../privacy_copy.dart';
 import '../privacy_phase.dart';
 import '../theme/theme.dart';
 
-class PermissionPromptSheet extends StatelessWidget {
+class PermissionPrompt extends StatelessWidget {
   final AccessItem item;
   final PrivacyPhase phase;
   final VoidCallback onAllow;
   final VoidCallback onContinue;
   final VoidCallback onDismiss;
 
-  const PermissionPromptSheet({
+  const PermissionPrompt({
     super.key,
     required this.item,
     required this.phase,
