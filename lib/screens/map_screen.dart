@@ -48,6 +48,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _showSystemOverview = false;
   bool _mapLoaded = false;
   bool _showFallback = false;
+  String? _mapErrorMessage;
 
   Timer? _promptTimer;
   Timer? _autoAdvanceTimer;
@@ -74,6 +75,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
       setState(() {
         _showFallback = true;
+        _mapErrorMessage =
+            'Map failed to load. Showing a static preview instead.';
       });
     });
   }
@@ -93,41 +96,48 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return Scaffold(
       body: Stack(
         children: [
-          MapLibreMap(
-            styleString: _mapStyleUrl,
-            initialCameraPosition: const CameraPosition(
-              target: _ljubljanaCenter,
-              zoom: 13.5,
+          Positioned.fill(
+            child: MapLibreMap(
+              styleString: _mapStyleUrl,
+              initialCameraPosition: const CameraPosition(
+                target: _ljubljanaCenter,
+                zoom: 13.5,
+              ),
+              minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
+              compassEnabled: false,
+              onMapCreated: (_) {
+                if (!mounted) {
+                  return;
+                }
+                setState(() {
+                  _mapErrorMessage = null;
+                });
+              },
+              onStyleLoadedCallback: () {
+                if (!mounted) {
+                  return;
+                }
+                setState(() {
+                  _mapLoaded = true;
+                  _showFallback = false;
+                  _mapErrorMessage = null;
+                });
+              },
             ),
-            minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
-            compassEnabled: false,
-            onStyleLoadedCallback: () {
-              if (!mounted) {
-                return;
-              }
-              setState(() {
-                _mapLoaded = true;
-                _showFallback = false;
-              });
-            },
           ),
           if (_showFallback)
             Positioned.fill(
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 600),
-                opacity: _showFallback ? 1 : 0,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.network(
-                      _fallbackMapUrl,
-                      fit: BoxFit.cover,
-                    ),
-                    Container(
-                      color: CozyTheme.cream.withOpacity(0.08),
-                    ),
-                  ],
-                ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    _fallbackMapUrl,
+                    fit: BoxFit.cover,
+                  ),
+                  Container(
+                    color: CozyTheme.cream.withOpacity(0.08),
+                  ),
+                ],
               ),
             ),
           Positioned.fill(
@@ -176,6 +186,68 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
+          Positioned(
+            top: 12,
+            left: 12,
+            child: SafeArea(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: CozyTheme.ink.withOpacity(0.08),
+                      blurRadius: 10,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  'Map widget mounted',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: CozyTheme.ink),
+                ),
+              ),
+            ),
+          ),
+          if (_mapErrorMessage != null)
+            Positioned(
+              left: 20,
+              right: 20,
+              top: 84,
+              child: SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: CozyTheme.ink.withOpacity(0.12),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: CozyTheme.peach),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _mapErrorMessage!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (_activePrompt != null)
             Align(
               alignment: Alignment.center,
