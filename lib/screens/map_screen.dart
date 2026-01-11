@@ -27,10 +27,18 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
+  static const LatLng _simulatedLocation = LatLng(46.0549, 14.5122);
+  static const double _defaultZoom = 13.5;
   static const String _mapStyleUrl =
       'https://api.maptiler.com/maps/streets/style.json?key=PEK7V4X8DK3A0P2AIZdI';
   static const String _fallbackMapUrl =
       'https://api.maptiler.com/maps/streets/static/14.5058,46.0569,13.5/1280x720.png?key=PEK7V4X8DK3A0P2AIZdI';
+
+  final Map<String, String> _destinationSubtitles = const {
+    'Tivoli Park': 'Tree-lined paths and quiet lawns.',
+    'Prešeren Square': 'City center with room to pause.',
+    'Metelkova': 'Creative quarter with tucked-away streets.',
+  };
 
   final List<String> _destinations = const [
     'Tivoli Park',
@@ -54,8 +62,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Timer? _autoAdvanceTimer;
   Timer? _fallbackTimer;
 
+  MapLibreMapController? _mapController;
+
   late final AnimationController _pulseController;
   late final AnimationController _shimmerController;
+  late final AnimationController _gpsPulseController;
 
   @override
   void initState() {
@@ -65,6 +76,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(seconds: 8),
     )..repeat(reverse: true);
     _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+    _gpsPulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
@@ -88,6 +103,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _fallbackTimer?.cancel();
     _pulseController.dispose();
     _shimmerController.dispose();
+    _gpsPulseController.dispose();
     super.dispose();
   }
 
@@ -101,11 +117,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               styleString: _mapStyleUrl,
               initialCameraPosition: const CameraPosition(
                 target: _ljubljanaCenter,
-                zoom: 13.5,
+                zoom: _defaultZoom,
               ),
               minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
               compassEnabled: false,
-              onMapCreated: (_) {
+              onMapCreated: (controller) {
+                _mapController = controller;
                 if (!mounted) {
                   return;
                 }
@@ -163,11 +180,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: _buildLocationPip(),
+            ),
+          ),
           SafeArea(
             child: Column(
               children: [
-                TopBar(onSystemOverview: _toggleSystemOverview),
-                _buildDestinationChips(),
+                TopBar(
+                  onSystemOverview: _toggleSystemOverview,
+                  onDestinations: _openDestinationSheet,
+                ),
                 _buildStatusStrip(),
                 const Spacer(),
                 Padding(
@@ -184,6 +208,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 12),
               ],
+            ),
+          ),
+          Positioned(
+            right: 20,
+            bottom: 24,
+            child: SafeArea(
+              child: _buildRecenterButton(),
             ),
           ),
           Positioned(
@@ -253,12 +284,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               alignment: Alignment.center,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: PermissionPrompt(
+                  child: PermissionPrompt(
                   item: _activePrompt!,
                   phase: widget.demoState.currentPhase,
                   onAllow: _grantPrompt,
-                  onContinue: _dismissPrompt,
-                  onDismiss: _dismissPrompt,
+                  onContinue: () => _dismissPrompt(showMessage: false),
+                  onDismiss: () => _dismissPrompt(showMessage: false),
                 ),
               ),
             ),
@@ -400,30 +431,66 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildDestinationChips() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: _destinations.map((destination) {
-            final selected = _selectedDestination == destination;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: ChoiceChip(
-                label: Text(destination),
-                selected: selected,
-                selectedColor: CozyTheme.lavender.withOpacity(0.6),
-                backgroundColor: Colors.white.withOpacity(0.9),
-                labelStyle: TextStyle(
-                  color: CozyTheme.ink,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+  Widget _buildLocationPip() {
+    return AnimatedBuilder(
+      animation: _gpsPulseController,
+      builder: (context, _) {
+        final pulse = _gpsPulseController.value;
+        final pulseSize = 34 + (pulse * 18);
+        return Align(
+          alignment: const Alignment(0.25, -0.05),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: pulseSize,
+                height: pulseSize,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: CozyTheme.mint.withOpacity(0.3 * (1 - pulse)),
                 ),
-                onSelected: (_) => _selectDestination(destination),
               ),
-            );
-          }).toList(),
-        ),
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: CozyTheme.mint,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: CozyTheme.ink.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRecenterButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.95),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: CozyTheme.ink.withOpacity(0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: const Icon(Icons.my_location_rounded),
+        color: CozyTheme.ink,
+        onPressed: _recenterMap,
+        tooltip: 'Recenter',
       ),
     );
   }
@@ -553,7 +620,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     widget.demoState.grant(prompt.id);
     _dismissPrompt(showMessage: true);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Suggestion saved gently.')),
+      const SnackBar(content: Text('Suggestion saved.')),
     );
   }
 
@@ -581,6 +648,76 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     setState(() {
       _showSystemOverview = !_showSystemOverview;
     });
+  }
+
+  void _recenterMap() {
+    final controller = _mapController;
+    if (controller == null) {
+      return;
+    }
+    final target = _mapLoaded ? _simulatedLocation : _ljubljanaCenter;
+    controller.animateCamera(
+      CameraUpdate.newLatLngZoom(target, _defaultZoom),
+    );
+  }
+
+  Future<void> _openDestinationSheet() async {
+    if (_isCalculating) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: CozyTheme.ink.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Destinations',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                ..._destinations.map((destination) {
+                  final subtitle = _destinationSubtitles[destination] ?? '';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(destination),
+                      subtitle: Text(subtitle),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        _selectDestination(destination);
+                      },
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
