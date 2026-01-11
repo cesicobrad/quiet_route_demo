@@ -11,7 +11,7 @@ class PrivacyCopy {
       case PrivacyPhase.phase3:
         return 'Steady care';
       case PrivacyPhase.phase4:
-        return 'Tiny signals keep you safe';
+        return 'Signals keep you safe';
       case PrivacyPhase.phase5:
         return 'Accuracy depends on trust';
       case PrivacyPhase.phase6:
@@ -26,15 +26,15 @@ class PrivacyCopy {
       case AccessItemId.locationAlways:
         return 'Background location keeps routes calm without you opening the app.';
       case AccessItemId.notifications:
-        return 'Allow light reminders so we can share small nudges only when needed.';
+        return 'Allow light reminders so we can share brief nudges only when needed.';
       case AccessItemId.photosMedia:
         return 'Save serene captures locally. Nothing leaves your device.';
       case AccessItemId.calendar:
         return 'We align quiet routes with your plans to reduce friction.';
       case AccessItemId.contacts:
-        return 'Invite trusted people to share peace routes when you choose.';
+        return 'Invite trusted people to share routes when you choose.';
       case AccessItemId.microphone:
-        return 'For breath check-ins you start. We only keep a brief calming score.';
+        return 'For breath check-ins you start. We only keep a brief calm score.';
       case AccessItemId.camera:
         return 'For calm scans you request. Images stay on your phone.';
       default:

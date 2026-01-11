@@ -4,31 +4,31 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
-import '../access_catalog.dart';
-import '../privacy_copy.dart';
-import '../state/demo_state.dart';
+import '../state/showcase_state.dart';
 import '../theme/theme.dart';
-import '../widgets/permission_prompt.dart';
+import '../widgets/heatmap_painter.dart';
+import '../widgets/prompt_card.dart';
 import '../widgets/route_card.dart';
 import '../widgets/top_bar.dart';
-import 'access_catalog_screen.dart';
+import 'system_screen.dart';
 
 class MapScreen extends StatefulWidget {
-  final DemoState demoState;
+  final ShowcaseState showcaseState;
 
   const MapScreen({
     super.key,
-    required this.demoState,
+    required this.showcaseState,
   });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
+class _MapScreenState extends State<MapScreen>
+    with TickerProviderStateMixin {
   static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
-  static const LatLng _simulatedLocation = LatLng(46.0549, 14.5122);
   static const double _defaultZoom = 13.5;
+  static const Alignment _pipAlignment = Alignment(0.25, 0.35);
   static const String _mapStyleUrl =
       'https://api.maptiler.com/maps/streets/style.json?key=PEK7V4X8DK3A0P2AIZdI';
   static const String _fallbackMapUrl =
@@ -46,44 +46,31 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     'Metelkova',
   ];
 
-  String? _selectedDestination;
-  bool _isCalculating = false;
-
-  int _routeMinutes = 0;
-  int _calmScore = 0;
-
-  AccessItem? _activePrompt;
-  bool _showSystemOverview = false;
   bool _mapLoaded = false;
   bool _showFallback = false;
   String? _mapErrorMessage;
 
-  Timer? _promptTimer;
-  Timer? _autoAdvanceTimer;
   Timer? _fallbackTimer;
-
   MapLibreMapController? _mapController;
 
   late final AnimationController _pulseController;
-  late final AnimationController _shimmerController;
   late final AnimationController _gpsPulseController;
+
+  bool _destinationSheetOpen = false;
+  Offset _pipOffsetFromCenter = Offset.zero;
 
   @override
   void initState() {
     super.initState();
+    widget.showcaseState.addListener(_handleShowcaseUpdates);
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 8),
     )..repeat(reverse: true);
-    _shimmerController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
     _gpsPulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
-    _scheduleNextPrompt(const Duration(seconds: 4));
     _fallbackTimer = Timer(const Duration(seconds: 12), () {
       if (!mounted || _mapLoaded) {
         return;
@@ -98,348 +85,246 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _promptTimer?.cancel();
-    _autoAdvanceTimer?.cancel();
+    widget.showcaseState.removeListener(_handleShowcaseUpdates);
     _fallbackTimer?.cancel();
     _pulseController.dispose();
-    _shimmerController.dispose();
     _gpsPulseController.dispose();
     super.dispose();
   }
 
+  void _handleShowcaseUpdates() {
+    final destination = widget.showcaseState.pendingDestination;
+    if (destination != null && !_destinationSheetOpen) {
+      _openDestinationSheet(autoSelect: destination);
+      widget.showcaseState.consumeDestinationRequest();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: MapLibreMap(
-              styleString: _mapStyleUrl,
-              initialCameraPosition: const CameraPosition(
-                target: _ljubljanaCenter,
-                zoom: _defaultZoom,
-              ),
-              minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
-              compassEnabled: false,
-              onMapCreated: (controller) {
-                _mapController = controller;
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _mapErrorMessage = null;
-                });
-              },
-              onStyleLoadedCallback: () {
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _mapLoaded = true;
-                  _showFallback = false;
-                  _mapErrorMessage = null;
-                });
-              },
-            ),
-          ),
-          if (_showFallback)
-            Positioned.fill(
-              child: Stack(
-                fit: StackFit.expand,
+    return AnimatedBuilder(
+      animation: widget.showcaseState,
+      builder: (context, _) {
+        final state = widget.showcaseState;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            _pipOffsetFromCenter = Offset(
+              constraints.maxWidth * _pipAlignment.x / 2,
+              constraints.maxHeight * _pipAlignment.y / 2,
+            );
+            return Scaffold(
+              body: Stack(
                 children: [
-                  Image.network(
-                    _fallbackMapUrl,
-                    fit: BoxFit.cover,
-                  ),
-                  Container(
-                    color: CozyTheme.cream.withOpacity(0.08),
-                  ),
-                ],
-              ),
-            ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, _) {
-                  return CustomPaint(
-                    painter: _HeatmapPainter(pulse: _pulseController.value),
-                  );
-                },
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: _RoutePainter(
-                  destination: _selectedDestination,
-                  showRoute:
-                      !_isCalculating && _selectedDestination != null && _routeMinutes > 0,
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: _buildLocationPip(),
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                TopBar(
-                  onSystemOverview: _toggleSystemOverview,
-                  onDestinations: _openDestinationSheet,
-                ),
-                _buildStatusStrip(),
-                const Spacer(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _legendBadge(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 350),
-                  child: _buildRouteCard(),
-                ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-          Positioned(
-            right: 20,
-            bottom: 24,
-            child: SafeArea(
-              child: _buildRecenterButton(),
-            ),
-          ),
-          Positioned(
-            top: 12,
-            left: 12,
-            child: SafeArea(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: CozyTheme.ink.withOpacity(0.08),
-                      blurRadius: 10,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  'Map widget mounted',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: CozyTheme.ink),
-                ),
-              ),
-            ),
-          ),
-          if (_mapErrorMessage != null)
-            Positioned(
-              left: 20,
-              right: 20,
-              top: 84,
-              child: SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: CozyTheme.ink.withOpacity(0.12),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
+                  Positioned.fill(
+                    child: MapLibreMap(
+                      styleString: _mapStyleUrl,
+                      initialCameraPosition: const CameraPosition(
+                        target: _ljubljanaCenter,
+                        zoom: _defaultZoom,
                       ),
-                    ],
+                      minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
+                      compassEnabled: false,
+                      onMapCreated: (controller) {
+                        _mapController = controller;
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() {
+                          _mapErrorMessage = null;
+                        });
+                      },
+                      onStyleLoadedCallback: () {
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() {
+                          _mapLoaded = true;
+                          _showFallback = false;
+                          _mapErrorMessage = null;
+                        });
+                      },
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.warning_amber_rounded,
-                          color: CozyTheme.peach),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _mapErrorMessage!,
-                          style: Theme.of(context).textTheme.bodySmall,
+                  if (_showFallback)
+                    Positioned.fill(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.network(
+                            _fallbackMapUrl,
+                            fit: BoxFit.cover,
+                          ),
+                          Container(
+                            color: CozyTheme.cream.withOpacity(0.08),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedBuilder(
+                        animation: _pulseController,
+                        builder: (context, _) {
+                          return CustomPaint(
+                            painter: HeatmapPainter(
+                              pulse: _pulseController.value,
+                              intensityFactor: state.heatmapIntensity,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _RoutePainter(
+                          destination: state.destination,
+                          showRoute: !state.isCalculating &&
+                              state.destination != null &&
+                              state.routeMinutes > 0,
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-          if (_activePrompt != null)
-            Align(
-              alignment: Alignment.center,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: PermissionPrompt(
-                  item: _activePrompt!,
-                  phase: widget.demoState.currentPhase,
-                  onAllow: _grantPrompt,
-                  onContinue: () => _dismissPrompt(showMessage: false),
-                  onDismiss: () => _dismissPrompt(showMessage: false),
-                ),
-              ),
-            ),
-          if (_showSystemOverview)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleSystemOverview,
-                child: Container(
-                  color: Colors.black.withOpacity(0.18),
-                ),
-              ),
-            ),
-          if (_showSystemOverview)
-            Positioned.fill(
-              child: SafeArea(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: AccessCatalogScreen(
-                    demoState: widget.demoState,
-                    onClose: _toggleSystemOverview,
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: _buildLocationPip(state),
+                    ),
                   ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _legendBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: CozyTheme.ink.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: CozyTheme.mint,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'Calmer zones',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusStrip() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: Row(
-        children: [
-          _statusPill(
-            label: 'Quietness',
-            value: _selectedDestination == null ? '82' : '$_calmScore',
-            color: CozyTheme.mint,
-          ),
-          const SizedBox(width: 10),
-          _statusPill(
-            label: 'Air',
-            value: 'Fresh',
-            color: CozyTheme.lavender,
-          ),
-          const SizedBox(width: 10),
-          _statusPill(
-            label: 'Crowds',
-            value: 'Low',
-            color: CozyTheme.peach,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusPill({
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.92),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: CozyTheme.ink.withOpacity(0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
+                  SafeArea(
+                    child: Column(
+                      children: [
+                        TopBar(
+                          onSystemPressed: () => state.openSystemScreen(),
+                          onDestinations: _openDestinationSheet,
+                          collectedSignals: state.collectedSignalsCount,
+                        ),
+                        Expanded(
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 320),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: ScaleTransition(
+                                    scale: Tween<double>(begin: 0.98, end: 1)
+                                        .animate(animation),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: state.activePrompt == null
+                                  ? const SizedBox.shrink()
+                                  : _PromptCardStack(
+                                      key: ValueKey(state.activePrompt!.title),
+                                      state: state,
+                                      maxWidth:
+                                          min(constraints.maxWidth * 0.9, 420),
+                                    ),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: RouteCard(
+                            destination: state.destination,
+                            minutes: state.routeMinutes,
+                            calmScore: state.calmScore,
+                            consentCount: state.consentCount,
+                            isCalculating: state.isCalculating,
+                            isPlaying: state.isPlaying,
+                            onStart: state.startShowcase,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  value,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontSize: 16),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+                  Positioned(
+                    right: 20,
+                    bottom: 190,
+                    child: SafeArea(
+                      child: _buildRecenterButton(),
+                    ),
+                  ),
+                  if (_mapErrorMessage != null)
+                    Positioned(
+                      left: 20,
+                      right: 20,
+                      top: 84,
+                      child: SafeArea(
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: CozyTheme.ink.withOpacity(0.12),
+                                blurRadius: 16,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded,
+                                  color: CozyTheme.peach),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _mapErrorMessage!,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (state.showSystemScreen)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: state.closeSystemScreen,
+                        child: Container(
+                          color: Colors.black.withOpacity(0.18),
+                        ),
+                      ),
+                    ),
+                  if (state.showSystemScreen)
+                    Positioned.fill(
+                      child: SafeArea(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: SystemScreen(
+                            showcaseState: state,
+                            onClose: state.closeSystemScreen,
+                            autoScroll: state.autoScrollSystem,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  Widget _buildLocationPip() {
+  Widget _buildLocationPip(ShowcaseState state) {
     return AnimatedBuilder(
       animation: _gpsPulseController,
       builder: (context, _) {
         final pulse = _gpsPulseController.value;
         final pulseSize = 34 + (pulse * 18);
         return Align(
-          alignment: const Alignment(0.25, -0.05),
+          alignment: _pipAlignment,
           child: Stack(
+            clipBehavior: Clip.none,
             alignment: Alignment.center,
             children: [
               Container(
@@ -466,6 +351,40 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ],
                 ),
               ),
+              if (state.showTwin)
+                Positioned(
+                  left: 18,
+                  top: -34,
+                  child: Opacity(
+                    opacity: state.twinOpacity,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: CozyTheme.ink.withOpacity(0.12),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.person_outline, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Twin',
+                            style: Theme.of(context).textTheme.labelMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         );
@@ -495,177 +414,37 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildRouteCard() {
-    if (_selectedDestination == null) {
-      return const SizedBox.shrink();
-    }
-    if (_isCalculating) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Card(
-          margin: const EdgeInsets.symmetric(horizontal: 20),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      CozyTheme.lavender,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Listening to the city…',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 6),
-                      AnimatedBuilder(
-                        animation: _shimmerController,
-                        builder: (context, _) {
-                          return _ShimmerBar(progress: _shimmerController.value);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    if (_routeMinutes == 0) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: RouteCard(
-        key: ValueKey(_selectedDestination),
-        destination: _selectedDestination!,
-        minutes: _routeMinutes,
-        calmScore: _calmScore,
-      ),
-    );
-  }
-
-  Future<void> _selectDestination(String destination) async {
-    if (_isCalculating) {
-      return;
-    }
-    setState(() {
-      _selectedDestination = destination;
-      _isCalculating = true;
-      _routeMinutes = 0;
-    });
-
-    await Future.delayed(const Duration(milliseconds: 1100));
-    if (!mounted) {
-      return;
-    }
-    final random = Random(destination.hashCode);
-    final minutes = 12 + random.nextInt(14);
-    final calm = destination == 'Tivoli Park'
-        ? 86 + random.nextInt(8)
-        : destination == 'Prešeren Square'
-            ? 62 + random.nextInt(18)
-            : 45 + random.nextInt(20);
-    setState(() {
-      _isCalculating = false;
-      _routeMinutes = minutes;
-      _calmScore = calm;
-    });
-    widget.demoState.registerRoutePlanned();
-    if (_activePrompt == null) {
-      _scheduleNextPrompt(const Duration(seconds: 2));
-    }
-  }
-
-  void _scheduleNextPrompt(Duration delay) {
-    _promptTimer?.cancel();
-    _promptTimer = Timer(delay, () {
-      if (!mounted || _activePrompt != null) {
-        return;
-      }
-      final candidate = widget.demoState.nextRequest();
-      if (candidate == null) {
-        return;
-      }
-      setState(() {
-        _activePrompt = candidate;
-      });
-      _autoAdvanceTimer?.cancel();
-      _autoAdvanceTimer = Timer(const Duration(seconds: 10), () {
-        if (!mounted || _activePrompt == null) {
-          return;
-        }
-        _dismissPrompt(showMessage: false);
-      });
-    });
-  }
-
-  void _grantPrompt() {
-    final prompt = _activePrompt;
-    if (prompt == null) {
-      return;
-    }
-    widget.demoState.grant(prompt.id);
-    _dismissPrompt(showMessage: true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Suggestion saved.')),
-    );
-  }
-
-  void _dismissPrompt({bool showMessage = true}) {
-    if (_activePrompt == null) {
-      return;
-    }
-    setState(() {
-      _activePrompt = null;
-    });
-    _autoAdvanceTimer?.cancel();
-    if (showMessage) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            PrivacyCopy.denialMessage(widget.demoState.currentPhase),
-          ),
-        ),
-      );
-    }
-    _scheduleNextPrompt(const Duration(seconds: 12));
-  }
-
-  void _toggleSystemOverview() {
-    setState(() {
-      _showSystemOverview = !_showSystemOverview;
-    });
-  }
-
-  void _recenterMap() {
+  Future<void> _recenterMap() async {
     final controller = _mapController;
     if (controller == null) {
       return;
     }
-    final target = _mapLoaded ? _simulatedLocation : _ljubljanaCenter;
-    controller.animateCamera(
-      CameraUpdate.newLatLngZoom(target, _defaultZoom),
+    await controller.animateCamera(
+      CameraUpdate.newLatLngZoom(_ljubljanaCenter, _defaultZoom),
     );
+    if (_pipOffsetFromCenter.dy.abs() > 1) {
+      await controller.animateCamera(
+        CameraUpdate.scrollBy(0, _pipOffsetFromCenter.dy),
+      );
+    }
   }
 
-  Future<void> _openDestinationSheet() async {
-    if (_isCalculating) {
+  Future<void> _openDestinationSheet({String? autoSelect}) async {
+    if (_destinationSheetOpen) {
       return;
     }
-    await showModalBottomSheet<void>(
+    _destinationSheetOpen = true;
+    if (autoSelect != null) {
+      Future<void>.delayed(const Duration(milliseconds: 700), () {
+        if (!mounted) {
+          return;
+        }
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(autoSelect);
+        }
+      });
+    }
+    final selected = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -704,10 +483,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       contentPadding: EdgeInsets.zero,
                       title: Text(destination),
                       subtitle: Text(subtitle),
-                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                      trailing:
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.of(context).pop();
-                        _selectDestination(destination);
+                        Navigator.of(context).pop(destination);
                       },
                     ),
                   );
@@ -718,77 +497,87 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         );
       },
     );
+    _destinationSheetOpen = false;
+    if (selected == null) {
+      return;
+    }
+    final route = _buildRouteDetails(selected);
+    await widget.showcaseState.startRouteCalculation(
+      destination: selected,
+      minutes: route.minutes,
+      calmScore: route.calmScore,
+    );
+  }
+
+  _RouteDetails _buildRouteDetails(String destination) {
+    if (destination == 'Tivoli Park') {
+      return const _RouteDetails(minutes: 18, calmScore: 82);
+    }
+    final random = Random(destination.hashCode);
+    final minutes = 12 + random.nextInt(14);
+    final calm = destination == 'Prešeren Square'
+        ? 62 + random.nextInt(18)
+        : 45 + random.nextInt(20);
+    return _RouteDetails(minutes: minutes, calmScore: calm);
   }
 }
 
-class _ShimmerBar extends StatelessWidget {
-  final double progress;
+class _PromptCardStack extends StatelessWidget {
+  final ShowcaseState state;
+  final double maxWidth;
 
-  const _ShimmerBar({
-    required this.progress,
+  const _PromptCardStack({
+    super.key,
+    required this.state,
+    required this.maxWidth,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 8,
-      decoration: BoxDecoration(
-        color: CozyTheme.cream,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Align(
-          alignment: Alignment(-1 + (progress * 2), 0),
-          child: Container(
-            width: 80,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.transparent,
-                  CozyTheme.lavender.withOpacity(0.6),
-                  Colors.transparent,
+    final prompt = state.activePrompt;
+    if (prompt == null) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: PromptCard(
+            title: prompt.title,
+            subtitle: prompt.subtitle,
+            body: prompt.body,
+            responseLine: state.promptResponse,
+            buttonsEnabled: false,
+          ),
+        ),
+        if (state.showQueueIndicator)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: CozyTheme.ink.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 6),
+                  ),
                 ],
+              ),
+              child: Text(
+                'Requests waiting: ${state.queueCount}',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelMedium
+                    ?.copyWith(color: CozyTheme.muted),
               ),
             ),
           ),
-        ),
-      ),
+      ],
     );
-  }
-}
-
-class _HeatmapPainter extends CustomPainter {
-  final double pulse;
-
-  const _HeatmapPainter({
-    required this.pulse,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final blobs = <_HeatBlob>[
-      _HeatBlob(Offset(size.width * 0.56, size.height * 0.36), 120, 0.22),
-      _HeatBlob(Offset(size.width * 0.64, size.height * 0.42), 100, 0.26),
-      _HeatBlob(Offset(size.width * 0.76, size.height * 0.5), 130, 0.2),
-      _HeatBlob(Offset(size.width * 0.42, size.height * 0.52), 110, 0.18),
-      _HeatBlob(Offset(size.width * 0.3, size.height * 0.6), 130, 0.14),
-      _HeatBlob(Offset(size.width * 0.22, size.height * 0.22), 150, 0.1),
-      _HeatBlob(Offset(size.width * 0.5, size.height * 0.72), 140, 0.16),
-    ];
-
-    for (final blob in blobs) {
-      final intensity = (blob.intensity + (pulse * 0.08)).clamp(0.05, 0.45);
-      final paint = Paint()
-        ..color = CozyTheme.mint.withOpacity(intensity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 70);
-      canvas.drawCircle(blob.center, blob.radius, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HeatmapPainter oldDelegate) {
-    return oldDelegate.pulse != pulse;
   }
 }
 
@@ -848,10 +637,12 @@ class _RoutePainter extends CustomPainter {
   }
 }
 
-class _HeatBlob {
-  final Offset center;
-  final double radius;
-  final double intensity;
+class _RouteDetails {
+  final int minutes;
+  final int calmScore;
 
-  const _HeatBlob(this.center, this.radius, this.intensity);
+  const _RouteDetails({
+    required this.minutes,
+    required this.calmScore,
+  });
 }

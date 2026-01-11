@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'screens/map_screen.dart';
-import 'state/demo_state.dart';
+import 'state/showcase_state.dart';
 import 'theme/theme.dart';
 
 void main() {
@@ -16,11 +16,11 @@ class QuietRouteApp extends StatefulWidget {
 }
 
 class _QuietRouteAppState extends State<QuietRouteApp> {
-  final DemoState _demoState = DemoState();
+  final ShowcaseState _showcaseState = ShowcaseState();
 
   @override
   void dispose() {
-    _demoState.dispose();
+    _showcaseState.dispose();
     super.dispose();
   }
 
@@ -29,7 +29,7 @@ class _QuietRouteAppState extends State<QuietRouteApp> {
     return MaterialApp(
       title: 'Quiet Route',
       theme: CozyTheme.build(),
-      home: MapScreen(demoState: _demoState),
+      home: MapScreen(showcaseState: _showcaseState),
     );
   }
 }
