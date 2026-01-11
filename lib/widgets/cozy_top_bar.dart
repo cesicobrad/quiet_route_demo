@@ -4,10 +4,12 @@ import '../theme/theme.dart';
 
 class CozyTopBar extends StatelessWidget {
   final VoidCallback onSettings;
+  final VoidCallback? onDestinations;
 
   const CozyTopBar({
     super.key,
     required this.onSettings,
+    this.onDestinations,
   });
 
   @override
@@ -27,6 +29,22 @@ class CozyTopBar extends StatelessWidget {
               ],
             ),
           ),
+          if (onDestinations != null) ...[
+            TextButton.icon(
+              onPressed: onDestinations,
+              style: TextButton.styleFrom(
+                foregroundColor: CozyTheme.ink,
+                backgroundColor: CozyTheme.cream,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(Icons.search_rounded, size: 18),
+              label: const Text('Destinations'),
+            ),
+            const SizedBox(width: 10),
+          ],
           Container(
             decoration: BoxDecoration(
               color: CozyTheme.peach.withOpacity(0.6),

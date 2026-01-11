@@ -23,11 +23,29 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
-  final List<String> _destinations = const [
-    'Tivoli Park',
-    'Prešeren Square',
-    'Metelkova',
+class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMixin {
+  static const Offset _ljubljanaCenter = Offset(0.5, 0.5);
+  static const Offset _simulatedLocation = Offset(0.6, 0.68);
+
+  final List<_DestinationOption> _destinationOptions = const [
+    _DestinationOption(
+      name: 'Tivoli Park',
+      subtitle: 'Tree-lined paths near the gardens',
+      mapLabel: 'Tivoli Park',
+      anchor: Offset(0.12, 0.18),
+    ),
+    _DestinationOption(
+      name: 'Prešeren Square',
+      subtitle: 'Historic core by the river',
+      mapLabel: 'Prešeren Sq.',
+      anchor: Offset(0.52, 0.33),
+    ),
+    _DestinationOption(
+      name: 'Metelkova',
+      subtitle: 'Creative district with murals',
+      mapLabel: 'Metelkova',
+      anchor: Offset(0.78, 0.63),
+    ),
   ];
 
   String? _selectedDestination;
@@ -38,6 +56,27 @@ class _MapScreenState extends State<MapScreen> {
   int _routeMinutes = 0;
   int _calmScore = 0;
 
+  Size? _mapSize;
+  Offset _cameraSlide = Offset.zero;
+  Offset _pendingCameraTarget = _ljubljanaCenter;
+
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -47,8 +86,10 @@ class _MapScreenState extends State<MapScreen> {
           builder: (context, _) {
             return Column(
               children: [
-                CozyTopBar(onSettings: _openSettings),
-                _buildDestinationChips(),
+                CozyTopBar(
+                  onSettings: _openSettings,
+                  onDestinations: _openDestinationSheet,
+                ),
                 _buildStatusStrip(),
                 Expanded(
                   child: Stack(
@@ -60,37 +101,59 @@ class _MapScreenState extends State<MapScreen> {
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               final size = constraints.biggest;
-                              return Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _MapPainter(),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _HeatmapPainter(),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _RoutePainter(
-                                        destination: _selectedDestination,
-                                        showRoute: !_isCalculating &&
-                                            _selectedDestination != null,
+                              if (_mapSize != size) {
+                                _mapSize = size;
+                                _cameraSlide =
+                                    _cameraSlideForTarget(_pendingCameraTarget);
+                              }
+                              return AnimatedSlide(
+                                offset: _cameraSlide,
+                                duration: const Duration(milliseconds: 650),
+                                curve: Curves.easeOutCubic,
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _MapPainter(),
                                       ),
                                     ),
-                                  ),
-                                  Positioned(
-                                    left: 18,
-                                    bottom: 18,
-                                    child: _legendBadge(),
-                                  ),
-                                  ..._buildMapLabels(size),
-                                ],
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _HeatmapPainter(),
+                                      ),
+                                    ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _RoutePainter(
+                                          destination: _selectedDestination,
+                                          showRoute: !_isCalculating &&
+                                              _selectedDestination != null,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 18,
+                                      bottom: 18,
+                                      child: _legendBadge(),
+                                    ),
+                                    ..._buildMapLabels(size),
+                                    _buildLocationPip(size),
+                                  ],
+                                ),
                               );
                             },
                           ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 22,
+                        bottom: 28,
+                        child: SafeArea(
+                          top: false,
+                          left: false,
+                          right: false,
+                          minimum: const EdgeInsets.only(bottom: 12),
+                          child: _recenterButton(),
                         ),
                       ),
                       Align(
@@ -217,32 +280,26 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   List<Widget> _buildMapLabels(Size mapSize) {
-    return [
-      _mapLabel(
-        mapSize,
-        const Offset(0.12, 0.18),
-        'Tivoli Park',
-        CozyTheme.mint,
-      ),
-      _mapLabel(
-        mapSize,
-        const Offset(0.52, 0.33),
-        'Prešeren Sq.',
-        CozyTheme.lavender,
-      ),
+    final labels = <Widget>[];
+    for (final destination in _destinationOptions) {
+      labels.add(
+        _mapLabel(
+          mapSize,
+          destination.anchor,
+          destination.mapLabel,
+          CozyTheme.mint,
+        ),
+      );
+    }
+    labels.add(
       _mapLabel(
         mapSize,
         const Offset(0.74, 0.44),
         'Rail Station',
         CozyTheme.peach,
       ),
-      _mapLabel(
-        mapSize,
-        const Offset(0.78, 0.63),
-        'Metelkova',
-        CozyTheme.peach,
-      ),
-    ];
+    );
+    return labels;
   }
 
   Widget _mapLabel(Size mapSize, Offset anchor, String label, Color color) {
@@ -267,30 +324,65 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _buildDestinationChips() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: _destinations.map((destination) {
-            final selected = _selectedDestination == destination;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: ChoiceChip(
-                label: Text(destination),
-                selected: selected,
-                selectedColor: CozyTheme.lavender.withOpacity(0.6),
-                backgroundColor: Colors.white,
-                labelStyle: TextStyle(
-                  color: CozyTheme.ink,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+  Widget _buildLocationPip(Size mapSize) {
+    final position = Offset(
+      _simulatedLocation.dx * mapSize.width,
+      _simulatedLocation.dy * mapSize.height,
+    );
+    return Positioned(
+      left: position.dx - 12,
+      top: position.dy - 12,
+      child: SizedBox(
+        width: 24,
+        height: 24,
+        child: AnimatedBuilder(
+          animation: _pulseController,
+          builder: (context, child) {
+            final t = Curves.easeOut.transform(_pulseController.value);
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                Opacity(
+                  opacity: (1 - t) * 0.45,
+                  child: Transform.scale(
+                    scale: 1 + t * 2.2,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: CozyTheme.lavender,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
                 ),
-                onSelected: (_) => _selectDestination(destination),
-              ),
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: CozyTheme.ink,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                ),
+              ],
             );
-          }).toList(),
+          },
         ),
+      ),
+    );
+  }
+
+  Widget _recenterButton() {
+    return Material(
+      color: Colors.white,
+      elevation: 6,
+      shape: const CircleBorder(),
+      child: IconButton(
+        icon: const Icon(Icons.my_location_rounded),
+        color: CozyTheme.ink,
+        onPressed: _recenterCamera,
+        tooltip: 'Recenter',
       ),
     );
   }
@@ -342,6 +434,7 @@ class _MapScreenState extends State<MapScreen> {
     if (_isCalculating) {
       return;
     }
+    _focusOnDestination(destination);
     setState(() {
       _selectedDestination = destination;
       _isCalculating = true;
@@ -386,15 +479,16 @@ class _MapScreenState extends State<MapScreen> {
             widget.demoState.grant(candidate.id);
             Navigator.of(context).pop();
             ScaffoldMessenger.of(this.context).showSnackBar(
-              const SnackBar(content: Text('Permission saved gently.')),
+              const SnackBar(content: Text('Permission saved.')),
             );
           },
           onDeny: () {
             Navigator.of(context).pop();
             ScaffoldMessenger.of(this.context).showSnackBar(
               SnackBar(
-                content:
-                    Text(PrivacyCopy.denialMessage(widget.demoState.currentPhase)),
+                content: Text(
+                  PrivacyCopy.denialMessage(widget.demoState.currentPhase),
+                ),
               ),
             );
           },
@@ -490,6 +584,97 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _openDestinationSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 48,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: CozyTheme.muted.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                Text('Destinations', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _destinationOptions.length,
+                  separatorBuilder: (_, __) => const Divider(height: 20),
+                  itemBuilder: (context, index) {
+                    final option = _destinationOptions[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(option.name),
+                      subtitle: Text(
+                        option.subtitle,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        _selectDestination(option.name);
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _recenterCamera() {
+    final target = _selectedDestination == null ? _ljubljanaCenter : _simulatedLocation;
+    _updateCameraTarget(target);
+  }
+
+  void _focusOnDestination(String destination) {
+    final option = _destinationOptions.firstWhere(
+      (item) => item.name == destination,
+      orElse: () => _destinationOptions.first,
+    );
+    _updateCameraTarget(option.anchor);
+  }
+
+  void _updateCameraTarget(Offset normalizedTarget) {
+    setState(() {
+      _pendingCameraTarget = normalizedTarget;
+      _cameraSlide = _cameraSlideForTarget(normalizedTarget);
+    });
+  }
+
+  Offset _cameraSlideForTarget(Offset normalizedTarget) {
+    final size = _mapSize;
+    if (size == null) {
+      return Offset.zero;
+    }
+    final targetPosition = Offset(
+      normalizedTarget.dx * size.width,
+      normalizedTarget.dy * size.height,
+    );
+    final center = Offset(size.width / 2, size.height / 2);
+    final offset = center - targetPosition;
+    return Offset(offset.dx / size.width, offset.dy / size.height);
+  }
+
   Future<void> _runScriptedDemo() async {
     if (!widget.demoState.demoMode) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -525,6 +710,20 @@ class _MapScreenState extends State<MapScreen> {
     );
     _isRunningScriptedDemo = false;
   }
+}
+
+class _DestinationOption {
+  final String name;
+  final String subtitle;
+  final String mapLabel;
+  final Offset anchor;
+
+  const _DestinationOption({
+    required this.name,
+    required this.subtitle,
+    required this.mapLabel,
+    required this.anchor,
+  });
 }
 
 class _MapPainter extends CustomPainter {
