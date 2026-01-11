@@ -69,14 +69,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1800),
     )..repeat();
     _scheduleNextPrompt(const Duration(seconds: 4));
-    _fallbackTimer = Timer(const Duration(seconds: 3), () {
+    _fallbackTimer = Timer(const Duration(seconds: 12), () {
       if (!mounted || _mapLoaded) {
         return;
       }
       setState(() {
         _showFallback = true;
         _mapErrorMessage =
-            'Map failed to load. Showing a static preview instead.';
+            'Map is taking longer than expected. Showing a static preview.';
       });
     });
   }
