@@ -3,7 +3,6 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import '../access_catalog.dart';
 import '../privacy_copy.dart';
 import '../state/demo_state.dart';
 import '../theme/theme.dart';
@@ -50,6 +49,7 @@ class _MapScreenState extends State<MapScreen> {
               children: [
                 CozyTopBar(onSettings: _openSettings),
                 _buildDestinationChips(),
+                _buildStatusStrip(),
                 Expanded(
                   child: Stack(
                     children: [
@@ -57,24 +57,39 @@ class _MapScreenState extends State<MapScreen> {
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(24),
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: _MapPainter(),
-                                ),
-                              ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: _HeatmapPainter(),
-                                ),
-                              ),
-                              Positioned(
-                                left: 18,
-                                bottom: 18,
-                                child: _legendBadge(),
-                              ),
-                            ],
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final size = constraints.biggest;
+                              return Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _MapPainter(),
+                                    ),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _HeatmapPainter(),
+                                    ),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _RoutePainter(
+                                        destination: _selectedDestination,
+                                        showRoute: !_isCalculating &&
+                                            _selectedDestination != null,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    left: 18,
+                                    bottom: 18,
+                                    child: _legendBadge(),
+                                  ),
+                                  ..._buildMapLabels(size),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -120,6 +135,134 @@ class _MapScreenState extends State<MapScreen> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildStatusStrip() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      child: Row(
+        children: [
+          _statusPill(
+            label: 'Quietness',
+            value: _selectedDestination == null ? '82' : '$_calmScore',
+            color: CozyTheme.mint,
+          ),
+          const SizedBox(width: 10),
+          _statusPill(
+            label: 'Air',
+            value: 'Fresh',
+            color: CozyTheme.lavender,
+          ),
+          const SizedBox(width: 10),
+          _statusPill(
+            label: 'Crowds',
+            value: 'Low',
+            color: CozyTheme.peach,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: CozyTheme.ink.withOpacity(0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  value,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontSize: 16),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildMapLabels(Size mapSize) {
+    return [
+      _mapLabel(
+        mapSize,
+        const Offset(0.12, 0.18),
+        'Tivoli Park',
+        CozyTheme.mint,
+      ),
+      _mapLabel(
+        mapSize,
+        const Offset(0.52, 0.33),
+        'Prešeren Sq.',
+        CozyTheme.lavender,
+      ),
+      _mapLabel(
+        mapSize,
+        const Offset(0.74, 0.44),
+        'Rail Station',
+        CozyTheme.peach,
+      ),
+      _mapLabel(
+        mapSize,
+        const Offset(0.78, 0.63),
+        'Metelkova',
+        CozyTheme.peach,
+      ),
+    ];
+  }
+
+  Widget _mapLabel(Size mapSize, Offset anchor, String label, Color color) {
+    return Positioned(
+      left: anchor.dx * mapSize.width,
+      top: anchor.dy * mapSize.height,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.5)),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: CozyTheme.ink),
+        ),
       ),
     );
   }
@@ -404,25 +547,45 @@ class _MapPainter extends CustomPainter {
     }
 
     final riverPaint = Paint()
-      ..color = CozyTheme.lavender.withOpacity(0.35)
+      ..color = CozyTheme.lavender.withOpacity(0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 18
+      ..strokeWidth = 16
       ..strokeCap = StrokeCap.round;
     final riverPath = Path()
-      ..moveTo(size.width * 0.05, size.height * 0.2)
+      ..moveTo(size.width * 0.02, size.height * 0.22)
       ..quadraticBezierTo(
-        size.width * 0.35,
-        size.height * 0.15,
-        size.width * 0.55,
-        size.height * 0.35,
+        size.width * 0.28,
+        size.height * 0.12,
+        size.width * 0.52,
+        size.height * 0.28,
       )
       ..quadraticBezierTo(
-        size.width * 0.7,
-        size.height * 0.5,
-        size.width * 0.9,
+        size.width * 0.68,
+        size.height * 0.45,
+        size.width * 0.96,
         size.height * 0.7,
       );
     canvas.drawPath(riverPath, riverPaint);
+
+    final parkPaint = Paint()
+      ..color = CozyTheme.mint.withOpacity(0.35)
+      ..style = PaintingStyle.fill;
+    final tivoliRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(size.width * 0.08, size.height * 0.12,
+          size.width * 0.22, size.height * 0.18),
+      const Radius.circular(22),
+    );
+    canvas.drawRRect(tivoliRect, parkPaint);
+
+    final plazaPaint = Paint()
+      ..color = CozyTheme.peach.withOpacity(0.3)
+      ..style = PaintingStyle.fill;
+    final plazaRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(size.width * 0.47, size.height * 0.28,
+          size.width * 0.12, size.height * 0.08),
+      const Radius.circular(16),
+    );
+    canvas.drawRRect(plazaRect, plazaPaint);
 
     final streetPaint = Paint()
       ..color = CozyTheme.peach.withOpacity(0.25)
@@ -431,14 +594,49 @@ class _MapPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final streets = [
-      [Offset(size.width * 0.1, size.height * 0.75), Offset(size.width * 0.4, size.height * 0.6)],
-      [Offset(size.width * 0.2, size.height * 0.4), Offset(size.width * 0.6, size.height * 0.4)],
-      [Offset(size.width * 0.6, size.height * 0.15), Offset(size.width * 0.85, size.height * 0.3)],
-      [Offset(size.width * 0.3, size.height * 0.9), Offset(size.width * 0.8, size.height * 0.8)],
+      [
+        Offset(size.width * 0.08, size.height * 0.75),
+        Offset(size.width * 0.38, size.height * 0.6),
+      ],
+      [
+        Offset(size.width * 0.18, size.height * 0.42),
+        Offset(size.width * 0.58, size.height * 0.4),
+      ],
+      [
+        Offset(size.width * 0.6, size.height * 0.15),
+        Offset(size.width * 0.88, size.height * 0.33),
+      ],
+      [
+        Offset(size.width * 0.28, size.height * 0.9),
+        Offset(size.width * 0.82, size.height * 0.8),
+      ],
+      [
+        Offset(size.width * 0.5, size.height * 0.55),
+        Offset(size.width * 0.8, size.height * 0.64),
+      ],
+      [
+        Offset(size.width * 0.35, size.height * 0.22),
+        Offset(size.width * 0.62, size.height * 0.28),
+      ],
     ];
     for (final segment in streets) {
       canvas.drawLine(segment.first, segment.last, streetPaint);
     }
+
+    final bridgePaint = Paint()
+      ..color = CozyTheme.ink.withOpacity(0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+    canvas.drawLine(
+      Offset(size.width * 0.45, size.height * 0.3),
+      Offset(size.width * 0.52, size.height * 0.28),
+      bridgePaint,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.6, size.height * 0.45),
+      Offset(size.width * 0.66, size.height * 0.48),
+      bridgePaint,
+    );
   }
 
   @override
@@ -471,6 +669,62 @@ class _HeatmapPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _RoutePainter extends CustomPainter {
+  final String? destination;
+  final bool showRoute;
+
+  const _RoutePainter({
+    required this.destination,
+    required this.showRoute,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!showRoute || destination == null) {
+      return;
+    }
+    final paint = Paint()
+      ..color = CozyTheme.ink.withOpacity(0.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path()..moveTo(size.width * 0.18, size.height * 0.78);
+    if (destination == 'Tivoli Park') {
+      path
+        ..quadraticBezierTo(
+          size.width * 0.2,
+          size.height * 0.45,
+          size.width * 0.18,
+          size.height * 0.22,
+        );
+    } else if (destination == 'Prešeren Square') {
+      path
+        ..quadraticBezierTo(
+          size.width * 0.38,
+          size.height * 0.55,
+          size.width * 0.52,
+          size.height * 0.32,
+        );
+    } else {
+      path
+        ..quadraticBezierTo(
+          size.width * 0.45,
+          size.height * 0.6,
+          size.width * 0.78,
+          size.height * 0.62,
+        );
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _RoutePainter oldDelegate) {
+    return oldDelegate.destination != destination ||
+        oldDelegate.showRoute != showRoute;
+  }
 }
 
 class _HeatBlob {
