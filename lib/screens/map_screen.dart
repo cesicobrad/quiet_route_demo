@@ -182,7 +182,7 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     final camera = await controller.cameraPosition;
-    final from = camera.target ?? _ljubljanaCenter;
+    final from = camera?.target ?? _ljubljanaCenter;
     final route = await _routingService.getWalkingRoute(from, _tivoliDestination);
     await _drawRoute(route);
     widget.playbackState.applyRouteResult(minutes: 18, calmScore: 82);
