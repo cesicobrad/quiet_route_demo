@@ -181,7 +181,7 @@ class _MapScreenState extends State<MapScreen>
       widget.playbackState.notifyListeners();
       return;
     }
-    final camera = await controller.getCameraPosition();
+    final camera = await controller.cameraPosition;
     final from = camera.target;
     final route = await _routingService.getWalkingRoute(from, _tivoliDestination);
     await _drawRoute(route);

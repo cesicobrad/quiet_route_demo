@@ -490,18 +490,30 @@ class _PromptSpec {
   final String body;
   final String responseLine;
 
-  const _PromptSpec.access({
+  factory _PromptSpec.access({
     required AccessItemId id,
-    required this.responseLine,
-  })  : accessItemId = id,
-        title = _accessTitle(id),
-        body = '';
+    required String responseLine,
+  }) {
+    return _PromptSpec._(
+      accessItemId: id,
+      title: _accessTitle(id),
+      body: '',
+      responseLine: responseLine,
+    );
+  }
 
   const _PromptSpec.custom({
     required this.title,
     required this.body,
     required this.responseLine,
   }) : accessItemId = null;
+
+  const _PromptSpec._({
+    required this.accessItemId,
+    required this.title,
+    required this.body,
+    required this.responseLine,
+  });
 
   static String _accessTitle(AccessItemId id) {
     return AccessCatalog.items.firstWhere((item) => item.id == id).title;
