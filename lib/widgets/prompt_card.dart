@@ -7,6 +7,8 @@ class PromptCard extends StatelessWidget {
   final String? subtitle;
   final String body;
   final String? responseLine;
+  final int? requestsWaiting;
+  final bool showActions;
   final bool buttonsEnabled;
   final VoidCallback? onYes;
   final VoidCallback? onMaybeLater;
@@ -17,6 +19,8 @@ class PromptCard extends StatelessWidget {
     required this.body,
     this.subtitle,
     this.responseLine,
+    this.requestsWaiting,
+    this.showActions = true,
     this.buttonsEnabled = true,
     this.onYes,
     this.onMaybeLater,
@@ -61,6 +65,16 @@ class PromptCard extends StatelessWidget {
               body,
               style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
             ),
+            if (requestsWaiting != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  'Requests waiting: $requestsWaiting',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: CozyTheme.muted,
+                  ),
+                ),
+              ),
             if (responseLine != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -71,40 +85,42 @@ class PromptCard extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: CozyTheme.lavender,
-                      foregroundColor: CozyTheme.ink,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+            if (showActions) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: CozyTheme.lavender,
+                        foregroundColor: CozyTheme.ink,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
+                      onPressed: buttonsEnabled ? onYes : null,
+                      child: const Text('Yes'),
                     ),
-                    onPressed: buttonsEnabled ? onYes : null,
-                    child: const Text('Yes'),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: CozyTheme.muted,
-                      side: BorderSide(color: CozyTheme.muted.withOpacity(0.3)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: CozyTheme.muted,
+                        side: BorderSide(color: CozyTheme.muted.withOpacity(0.3)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
+                      onPressed: buttonsEnabled ? onMaybeLater : null,
+                      child: const Text('Maybe later'),
                     ),
-                    onPressed: buttonsEnabled ? onMaybeLater : null,
-                    child: const Text('Maybe later'),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

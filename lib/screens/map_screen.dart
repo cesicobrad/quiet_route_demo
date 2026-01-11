@@ -1,23 +1,24 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
-import '../state/showcase_state.dart';
+import '../services/routing_service.dart';
+import '../state/playback_state.dart';
 import '../theme/theme.dart';
-import '../widgets/heatmap_painter.dart';
+import '../widgets/gps_pip.dart';
+import '../widgets/heat_overlay.dart';
 import '../widgets/prompt_card.dart';
 import '../widgets/route_card.dart';
 import '../widgets/top_bar.dart';
 import 'system_screen.dart';
 
 class MapScreen extends StatefulWidget {
-  final ShowcaseState showcaseState;
+  final PlaybackState playbackState;
 
   const MapScreen({
     super.key,
-    required this.showcaseState,
+    required this.playbackState,
   });
 
   @override
@@ -27,12 +28,12 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen>
     with TickerProviderStateMixin {
   static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
+  static const LatLng _tivoliDestination = LatLng(46.0597, 14.4911);
   static const double _defaultZoom = 13.5;
-  static const Alignment _pipAlignment = Alignment(0.25, 0.35);
+  static const double _routeCardHeight = 220;
   static const String _mapStyleUrl =
       'https://api.maptiler.com/maps/streets/style.json?key=PEK7V4X8DK3A0P2AIZdI';
-  static const String _fallbackMapUrl =
-      'https://api.maptiler.com/maps/streets/static/14.5058,46.0569,13.5/1280x720.png?key=PEK7V4X8DK3A0P2AIZdI';
+  static const String _maptilerKey = 'PEK7V4X8DK3A0P2AIZdI';
 
   final Map<String, String> _destinationSubtitles = const {
     'Tivoli Park': 'Tree-lined paths and quiet lawns.',
@@ -46,341 +47,122 @@ class _MapScreenState extends State<MapScreen>
     'Metelkova',
   ];
 
-  bool _mapLoaded = false;
-  bool _showFallback = false;
-  String? _mapErrorMessage;
+  final RoutingService _routingService = RoutingService(apiKey: _maptilerKey);
 
-  Timer? _fallbackTimer;
+  late final Widget _mapWidget;
   MapLibreMapController? _mapController;
+  bool _styleLoaded = false;
 
-  late final AnimationController _pulseController;
-  late final AnimationController _gpsPulseController;
+  int _lastRouteRequestId = 0;
+  Line? _routeLine;
 
   bool _destinationSheetOpen = false;
-  Offset _pipOffsetFromCenter = Offset.zero;
 
   @override
   void initState() {
     super.initState();
-    widget.showcaseState.addListener(_handleShowcaseUpdates);
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 8),
-    )..repeat(reverse: true);
-    _gpsPulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-    _fallbackTimer = Timer(const Duration(seconds: 12), () {
-      if (!mounted || _mapLoaded) {
-        return;
-      }
-      setState(() {
-        _showFallback = true;
-        _mapErrorMessage =
-            'Map is taking longer than expected. Showing a static preview.';
-      });
-    });
+    widget.playbackState.addListener(_handlePlaybackUpdates);
+    _mapWidget = _MapSurface(
+      styleUrl: _mapStyleUrl,
+      initialTarget: _ljubljanaCenter,
+      zoom: _defaultZoom,
+      onMapCreated: _onMapCreated,
+      onStyleLoaded: _onStyleLoaded,
+    );
   }
 
   @override
   void dispose() {
-    widget.showcaseState.removeListener(_handleShowcaseUpdates);
-    _fallbackTimer?.cancel();
-    _pulseController.dispose();
-    _gpsPulseController.dispose();
+    widget.playbackState.removeListener(_handlePlaybackUpdates);
     super.dispose();
   }
 
-  void _handleShowcaseUpdates() {
-    final destination = widget.showcaseState.pendingDestination;
-    if (destination != null && !_destinationSheetOpen) {
-      _openDestinationSheet(autoSelect: destination);
-      widget.showcaseState.consumeDestinationRequest();
+  void _onMapCreated(MapLibreMapController controller) {
+    _mapController = controller;
+  }
+
+  void _onStyleLoaded() {
+    _styleLoaded = true;
+  }
+
+  void _handlePlaybackUpdates() {
+    final state = widget.playbackState;
+    if (state.routeRequestId != _lastRouteRequestId) {
+      _lastRouteRequestId = state.routeRequestId;
+      _recalculateRoute();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: widget.showcaseState,
+      animation: widget.playbackState,
       builder: (context, _) {
-        final state = widget.showcaseState;
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            _pipOffsetFromCenter = Offset(
-              constraints.maxWidth * _pipAlignment.x / 2,
-              constraints.maxHeight * _pipAlignment.y / 2,
-            );
-            return Scaffold(
-              body: Stack(
-                children: [
-                  Positioned.fill(
-                    child: MapLibreMap(
-                      styleString: _mapStyleUrl,
-                      initialCameraPosition: const CameraPosition(
-                        target: _ljubljanaCenter,
-                        zoom: _defaultZoom,
-                      ),
-                      minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
-                      compassEnabled: false,
-                      onMapCreated: (controller) {
-                        _mapController = controller;
-                        if (!mounted) {
-                          return;
-                        }
-                        setState(() {
-                          _mapErrorMessage = null;
-                        });
-                      },
-                      onStyleLoadedCallback: () {
-                        if (!mounted) {
-                          return;
-                        }
-                        setState(() {
-                          _mapLoaded = true;
-                          _showFallback = false;
-                          _mapErrorMessage = null;
-                        });
-                      },
-                    ),
-                  ),
-                  if (_showFallback)
-                    Positioned.fill(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.network(
-                            _fallbackMapUrl,
-                            fit: BoxFit.cover,
-                          ),
-                          Container(
-                            color: CozyTheme.cream.withOpacity(0.08),
-                          ),
-                        ],
-                      ),
-                    ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedBuilder(
-                        animation: _pulseController,
-                        builder: (context, _) {
-                          return CustomPaint(
-                            painter: HeatmapPainter(
-                              pulse: _pulseController.value,
-                              intensityFactor: state.heatmapIntensity,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _RoutePainter(
-                          destination: state.destination,
-                          showRoute: !state.isCalculating &&
-                              state.destination != null &&
-                              state.routeMinutes > 0,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: _buildLocationPip(state),
-                    ),
-                  ),
-                  SafeArea(
-                    child: Column(
-                      children: [
-                        TopBar(
-                          onSystemPressed: () => state.openSystemScreen(),
-                          onDestinations: _openDestinationSheet,
-                          collectedSignals: state.collectedSignalsCount,
-                        ),
-                        Expanded(
-                          child: Center(
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 320),
-                              switchInCurve: Curves.easeOutCubic,
-                              switchOutCurve: Curves.easeInCubic,
-                              transitionBuilder: (child, animation) {
-                                return FadeTransition(
-                                  opacity: animation,
-                                  child: ScaleTransition(
-                                    scale: Tween<double>(begin: 0.98, end: 1)
-                                        .animate(animation),
-                                    child: child,
-                                  ),
-                                );
-                              },
-                              child: state.activePrompt == null
-                                  ? const SizedBox.shrink()
-                                  : _PromptCardStack(
-                                      key: ValueKey(state.activePrompt!.title),
-                                      state: state,
-                                      maxWidth:
-                                          min(constraints.maxWidth * 0.9, 420),
-                                    ),
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: RouteCard(
-                            destination: state.destination,
-                            minutes: state.routeMinutes,
-                            calmScore: state.calmScore,
-                            consentCount: state.consentCount,
-                            isCalculating: state.isCalculating,
-                            isPlaying: state.isPlaying,
-                            onStart: state.startShowcase,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Positioned(
-                    right: 20,
-                    bottom: 190,
-                    child: SafeArea(
-                      child: _buildRecenterButton(),
-                    ),
-                  ),
-                  if (_mapErrorMessage != null)
-                    Positioned(
-                      left: 20,
-                      right: 20,
-                      top: 84,
-                      child: SafeArea(
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: CozyTheme.ink.withOpacity(0.12),
-                                blurRadius: 16,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.warning_amber_rounded,
-                                  color: CozyTheme.peach),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  _mapErrorMessage!,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (state.showSystemScreen)
-                    Positioned.fill(
-                      child: GestureDetector(
-                        onTap: state.closeSystemScreen,
-                        child: Container(
-                          color: Colors.black.withOpacity(0.18),
-                        ),
-                      ),
-                    ),
-                  if (state.showSystemScreen)
-                    Positioned.fill(
-                      child: SafeArea(
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: SystemScreen(
-                            showcaseState: state,
-                            onClose: state.closeSystemScreen,
-                            autoScroll: state.autoScrollSystem,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildLocationPip(ShowcaseState state) {
-    return AnimatedBuilder(
-      animation: _gpsPulseController,
-      builder: (context, _) {
-        final pulse = _gpsPulseController.value;
-        final pulseSize = 34 + (pulse * 18);
-        return Align(
-          alignment: _pipAlignment,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
+        final state = widget.playbackState;
+        return Scaffold(
+          body: Stack(
             children: [
-              Container(
-                width: pulseSize,
-                height: pulseSize,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: CozyTheme.mint.withOpacity(0.3 * (1 - pulse)),
+              Positioned.fill(child: _mapWidget),
+              Positioned.fill(
+                child: DisturbanceHeatOverlay(show: state.showHeat),
+              ),
+              Align(
+                alignment: const Alignment(0, 0.55),
+                child: ScreenPinnedGpsPip(
+                  showTwin: state.showTwin,
+                  twinOpacity: state.twinOpacity,
                 ),
               ),
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: CozyTheme.mint,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: CozyTheme.ink.withOpacity(0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
+              SafeArea(
+                child: Column(
+                  children: [
+                    TopBar(
+                      onSystemPressed: () => state.openSystemScreen(),
+                      onDestinations: _openDestinationSheet,
+                      collectedSignals: state.collectedSignalsCount,
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: _CenterOverlayHost(state: state),
+                      ),
+                    ),
+                    SizedBox(
+                      height: _routeCardHeight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: RouteCard(
+                          destination: state.destination,
+                          minutes: state.routeMinutes,
+                          calmScore: state.calmScore,
+                          consentCount: state.consentScore,
+                          isCalculating: state.routeCalculating,
+                          isPlaying: state.isPlaying,
+                          statusText: state.bottomStatusText,
+                          onStart: state.startPlayback,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-              if (state.showTwin)
-                Positioned(
-                  left: 18,
-                  top: -34,
-                  child: Opacity(
-                    opacity: state.twinOpacity,
+              if (state.showSystemScreen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: state.closeSystemScreen,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: CozyTheme.ink.withOpacity(0.12),
-                            blurRadius: 12,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.person_outline, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Twin',
-                            style: Theme.of(context).textTheme.labelMedium,
-                          ),
-                        ],
+                      color: Colors.black.withOpacity(0.18),
+                    ),
+                  ),
+                ),
+              if (state.showSystemScreen)
+                Positioned.fill(
+                  child: SafeArea(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: SystemScreen(
+                        playbackState: state,
+                        onClose: state.closeSystemScreen,
+                        autoScroll: state.autoScrollSystem,
                       ),
                     ),
                   ),
@@ -392,58 +174,45 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  Widget _buildRecenterButton() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: CozyTheme.ink.withOpacity(0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.my_location_rounded),
-        color: CozyTheme.ink,
-        onPressed: _recenterMap,
-        tooltip: 'Recenter',
-      ),
-    );
+  Future<void> _recalculateRoute() async {
+    final controller = _mapController;
+    if (controller == null || !_styleLoaded) {
+      widget.playbackState.routeCalculating = false;
+      widget.playbackState.notifyListeners();
+      return;
+    }
+    final camera = await controller.getCameraPosition();
+    final from = camera.target;
+    final route = await _routingService.getWalkingRoute(from, _tivoliDestination);
+    await _drawRoute(route);
+    widget.playbackState.applyRouteResult(minutes: 18, calmScore: 82);
   }
 
-  Future<void> _recenterMap() async {
+  Future<void> _drawRoute(List<LatLng> route) async {
     final controller = _mapController;
     if (controller == null) {
       return;
     }
-    await controller.animateCamera(
-      CameraUpdate.newLatLngZoom(_ljubljanaCenter, _defaultZoom),
-    );
-    if (_pipOffsetFromCenter.dy.abs() > 1) {
-      await controller.animateCamera(
-        CameraUpdate.scrollBy(0, _pipOffsetFromCenter.dy),
-      );
+    if (_routeLine != null) {
+      await controller.removeLine(_routeLine!);
+      _routeLine = null;
     }
+    final line = await controller.addLine(
+      LineOptions(
+        geometry: route,
+        lineColor: '#2C2C2C',
+        lineWidth: 4,
+        lineOpacity: 0.6,
+      ),
+    );
+    _routeLine = line;
   }
 
-  Future<void> _openDestinationSheet({String? autoSelect}) async {
+  Future<void> _openDestinationSheet() async {
     if (_destinationSheetOpen) {
       return;
     }
     _destinationSheetOpen = true;
-    if (autoSelect != null) {
-      Future<void>.delayed(const Duration(milliseconds: 700), () {
-        if (!mounted) {
-          return;
-        }
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop(autoSelect);
-        }
-      });
-    }
     final selected = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
@@ -501,11 +270,14 @@ class _MapScreenState extends State<MapScreen>
     if (selected == null) {
       return;
     }
-    final route = _buildRouteDetails(selected);
-    await widget.showcaseState.startRouteCalculation(
-      destination: selected,
-      minutes: route.minutes,
-      calmScore: route.calmScore,
+    widget.playbackState.destination = selected;
+    widget.playbackState.bottomStatusText = 'Calculating route…';
+    widget.playbackState.routeCalculating = true;
+    widget.playbackState.notifyListeners();
+    final details = _buildRouteDetails(selected);
+    widget.playbackState.applyRouteResult(
+      minutes: details.minutes,
+      calmScore: details.calmScore,
     );
   }
 
@@ -522,118 +294,66 @@ class _MapScreenState extends State<MapScreen>
   }
 }
 
-class _PromptCardStack extends StatelessWidget {
-  final ShowcaseState state;
-  final double maxWidth;
+class _MapSurface extends StatelessWidget {
+  final String styleUrl;
+  final LatLng initialTarget;
+  final double zoom;
+  final ValueChanged<MapLibreMapController> onMapCreated;
+  final VoidCallback onStyleLoaded;
 
-  const _PromptCardStack({
-    super.key,
-    required this.state,
-    required this.maxWidth,
+  const _MapSurface({
+    required this.styleUrl,
+    required this.initialTarget,
+    required this.zoom,
+    required this.onMapCreated,
+    required this.onStyleLoaded,
   });
 
   @override
   Widget build(BuildContext context) {
-    final prompt = state.activePrompt;
-    if (prompt == null) {
-      return const SizedBox.shrink();
-    }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxWidth),
-          child: PromptCard(
-            title: prompt.title,
-            subtitle: prompt.subtitle,
-            body: prompt.body,
-            responseLine: state.promptResponse,
-            buttonsEnabled: false,
-          ),
+    return RepaintBoundary(
+      child: MapLibreMap(
+        styleString: styleUrl,
+        initialCameraPosition: CameraPosition(
+          target: initialTarget,
+          zoom: zoom,
         ),
-        if (state.showQueueIndicator)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: CozyTheme.ink.withOpacity(0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Text(
-                'Requests waiting: ${state.queueCount}',
-                style: Theme.of(context)
-                    .textTheme
-                    .labelMedium
-                    ?.copyWith(color: CozyTheme.muted),
-              ),
-            ),
-          ),
-      ],
+        minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
+        compassEnabled: false,
+        onMapCreated: onMapCreated,
+        onStyleLoadedCallback: onStyleLoaded,
+      ),
     );
   }
 }
 
-class _RoutePainter extends CustomPainter {
-  final String? destination;
-  final bool showRoute;
+class _CenterOverlayHost extends StatelessWidget {
+  final PlaybackState state;
 
-  const _RoutePainter({
-    required this.destination,
-    required this.showRoute,
-  });
+  const _CenterOverlayHost({required this.state});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    if (!showRoute || destination == null) {
-      return;
-    }
-    final paint = Paint()
-      ..color = CozyTheme.ink.withOpacity(0.25)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path()..moveTo(size.width * 0.18, size.height * 0.78);
-    if (destination == 'Tivoli Park') {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.2,
-          size.height * 0.45,
-          size.width * 0.18,
-          size.height * 0.22,
-        );
-    } else if (destination == 'Prešeren Square') {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.38,
-          size.height * 0.55,
-          size.width * 0.52,
-          size.height * 0.32,
-        );
-    } else {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.45,
-          size.height * 0.6,
-          size.width * 0.78,
-          size.height * 0.62,
-        );
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _RoutePainter oldDelegate) {
-    return oldDelegate.destination != destination ||
-        oldDelegate.showRoute != showRoute;
+  Widget build(BuildContext context) {
+    final card = state.activeCard;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: card == null
+          ? const SizedBox.shrink()
+          : ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: PromptCard(
+                title: card.title,
+                subtitle: card.subtitle,
+                body: card.body,
+                responseLine: card.responseLine,
+                requestsWaiting: card.requestsWaiting,
+                showActions: card.type == OverlayCardType.prompt,
+                buttonsEnabled: false,
+              ),
+            ),
+    );
   }
 }
 

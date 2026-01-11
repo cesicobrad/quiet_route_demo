@@ -4,17 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../access_catalog.dart';
 import '../privacy_copy.dart';
-import '../state/showcase_state.dart';
+import '../state/playback_state.dart';
 import '../theme/theme.dart';
 
 class SystemScreen extends StatefulWidget {
-  final ShowcaseState showcaseState;
+  final PlaybackState playbackState;
   final VoidCallback onClose;
   final bool autoScroll;
 
   const SystemScreen({
     super.key,
-    required this.showcaseState,
+    required this.playbackState,
     required this.onClose,
     this.autoScroll = false,
   });
@@ -54,7 +54,7 @@ class _SystemScreenState extends State<SystemScreen> {
   @override
   Widget build(BuildContext context) {
     final total = AccessCatalog.items.length;
-    final grantedCount = widget.showcaseState.collectedSignalsCount;
+    final grantedCount = widget.playbackState.collectedSignalsCount;
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = min(constraints.maxHeight * 0.75, 520.0);
@@ -89,11 +89,11 @@ class _SystemScreenState extends State<SystemScreen> {
                     onSelected: (value) {
                       switch (value) {
                         case _SystemAction.reset:
-                          widget.showcaseState.reset();
+                          widget.playbackState.reset();
                           widget.onClose();
                           break;
                         case _SystemAction.stop:
-                          widget.showcaseState.stopShowcase();
+                          widget.playbackState.stopPlayback();
                           widget.onClose();
                           break;
                       }
@@ -104,7 +104,7 @@ class _SystemScreenState extends State<SystemScreen> {
                           value: _SystemAction.reset,
                           child: Text('Reset'),
                         ),
-                        if (widget.showcaseState.isPlaying)
+                        if (widget.playbackState.isPlaying)
                           const PopupMenuItem(
                             value: _SystemAction.stop,
                             child: Text('Stop'),
@@ -132,8 +132,7 @@ class _SystemScreenState extends State<SystemScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final item = AccessCatalog.items[index];
-                    final isGranted =
-                        widget.showcaseState.hasSignal(item.id);
+                    final isGranted = widget.playbackState.hasSignal(item.id);
                     return Opacity(
                       opacity: isGranted ? 1 : 0.5,
                       child: Container(
@@ -201,7 +200,7 @@ class _SystemScreenState extends State<SystemScreen> {
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Text(
-                  PrivacyCopy.patternFooter(widget.showcaseState.currentPhase),
+                  PrivacyCopy.patternFooter(widget.playbackState.currentPhase),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),

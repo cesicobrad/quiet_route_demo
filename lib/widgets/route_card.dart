@@ -9,6 +9,7 @@ class RouteCard extends StatelessWidget {
   final int consentCount;
   final bool isCalculating;
   final bool isPlaying;
+  final String? statusText;
   final VoidCallback onStart;
 
   const RouteCard({
@@ -19,6 +20,7 @@ class RouteCard extends StatelessWidget {
     required this.consentCount,
     required this.isCalculating,
     required this.isPlaying,
+    required this.statusText,
     required this.onStart,
   });
 
@@ -42,14 +44,7 @@ class RouteCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            if (isCalculating) ...[
-              Text(
-                'Calculating route…',
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 6),
-              const _ShimmerBar(),
-            ] else if (destination != null && minutes > 0) ...[
+            if (destination != null && minutes > 0) ...[
               Text(destination!, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 12),
               Wrap(
@@ -73,6 +68,8 @@ class RouteCard extends StatelessWidget {
                 style: theme.textTheme.bodyMedium,
               ),
             ],
+            const SizedBox(height: 10),
+            _StatusLine(text: statusText, showSpinner: isCalculating),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -92,6 +89,43 @@ class RouteCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StatusLine extends StatelessWidget {
+  final String? text;
+  final bool showSpinner;
+
+  const _StatusLine({
+    required this.text,
+    required this.showSpinner,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (text == null && !showSpinner) {
+      return const SizedBox(height: 18);
+    }
+    return Row(
+      children: [
+        if (showSpinner)
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        if (showSpinner) const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text ?? 'Updating route…',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: CozyTheme.muted),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -143,69 +177,6 @@ class _ConsentChip extends StatelessWidget {
             .textTheme
             .labelMedium
             ?.copyWith(color: CozyTheme.ink),
-      ),
-    );
-  }
-}
-
-class _ShimmerBar extends StatefulWidget {
-  const _ShimmerBar();
-
-  @override
-  State<_ShimmerBar> createState() => _ShimmerBarState();
-}
-
-class _ShimmerBarState extends State<_ShimmerBar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 8,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          return Container(
-            decoration: BoxDecoration(
-              color: CozyTheme.cream,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Align(
-                alignment: Alignment(-1 + (_controller.value * 2), 0),
-                child: Container(
-                  width: 80,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.transparent,
-                        CozyTheme.lavender.withOpacity(0.6),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
