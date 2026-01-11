@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 
+import '../access_catalog.dart';
 import '../privacy_copy.dart';
 import '../state/demo_state.dart';
 import '../theme/theme.dart';
@@ -23,7 +25,29 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
+  static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
+  static const String _mapStyle = '''
+{
+  "version": 8,
+  "sources": {
+    "osm": {
+      "type": "raster",
+      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      "tileSize": 256,
+      "attribution": "© OpenStreetMap contributors"
+    }
+  },
+  "layers": [
+    {
+      "id": "osm",
+      "type": "raster",
+      "source": "osm"
+    }
+  ]
+}
+''';
+
   final List<String> _destinations = const [
     'Tivoli Park',
     'Prešeren Square',
@@ -32,81 +56,138 @@ class _MapScreenState extends State<MapScreen> {
 
   String? _selectedDestination;
   bool _isCalculating = false;
-  bool _hasShownPrompt = false;
-  bool _isRunningScriptedDemo = false;
 
   int _routeMinutes = 0;
   int _calmScore = 0;
 
+  AccessItem? _activePrompt;
+  bool _showSystemOverview = false;
+
+  Timer? _promptTimer;
+  Timer? _autoAdvanceTimer;
+
+  late final AnimationController _pulseController;
+  late final AnimationController _shimmerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 8),
+    )..repeat(reverse: true);
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+    _scheduleNextPrompt(const Duration(seconds: 4));
+  }
+
+  @override
+  void dispose() {
+    _promptTimer?.cancel();
+    _autoAdvanceTimer?.cancel();
+    _pulseController.dispose();
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: AnimatedBuilder(
-          animation: widget.demoState,
-          builder: (context, _) {
-            return Column(
+      body: Stack(
+        children: [
+          MapLibreMap(
+            styleString: _mapStyle,
+            initialCameraPosition: const CameraPosition(
+              target: _ljubljanaCenter,
+              zoom: 13.6,
+            ),
+            minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
+            compassEnabled: false,
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _pulseController,
+                builder: (context, _) {
+                  return CustomPaint(
+                    painter: _HeatmapPainter(pulse: _pulseController.value),
+                  );
+                },
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _RoutePainter(
+                  destination: _selectedDestination,
+                  showRoute:
+                      !_isCalculating && _selectedDestination != null && _routeMinutes > 0,
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
               children: [
-                CozyTopBar(onSettings: _openSettings),
+                CozyTopBar(onSettings: _toggleSystemOverview),
                 _buildDestinationChips(),
                 _buildStatusStrip(),
-                Expanded(
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final size = constraints.biggest;
-                              return Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _MapPainter(),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _HeatmapPainter(),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _RoutePainter(
-                                        destination: _selectedDestination,
-                                        showRoute: !_isCalculating &&
-                                            _selectedDestination != null,
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    left: 18,
-                                    bottom: 18,
-                                    child: _legendBadge(),
-                                  ),
-                                  ..._buildMapLabels(size),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 350),
-                          child: _buildRouteCard(),
-                        ),
-                      ),
-                    ],
+                const Spacer(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _legendBadge(),
                   ),
                 ),
+                const SizedBox(height: 12),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 350),
+                  child: _buildRouteCard(),
+                ),
+                const SizedBox(height: 12),
               ],
-            );
-          },
-        ),
+            ),
+          ),
+          if (_activePrompt != null)
+            Align(
+              alignment: Alignment.center,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: PermissionPromptSheet(
+                  item: _activePrompt!,
+                  phase: widget.demoState.currentPhase,
+                  onAllow: _grantPrompt,
+                  onContinue: _dismissPrompt,
+                  onDismiss: _dismissPrompt,
+                ),
+              ),
+            ),
+          if (_showSystemOverview)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _toggleSystemOverview,
+                child: Container(
+                  color: Colors.black.withOpacity(0.15),
+                ),
+              ),
+            ),
+          if (_showSystemOverview)
+            Positioned.fill(
+              child: SafeArea(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: AccessCatalogScreen(
+                    demoState: widget.demoState,
+                    onClose: _toggleSystemOverview,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -117,6 +198,13 @@ class _MapScreenState extends State<MapScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: CozyTheme.ink.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -125,13 +213,13 @@ class _MapScreenState extends State<MapScreen> {
             width: 10,
             height: 10,
             decoration: BoxDecoration(
-              color: CozyTheme.peach,
+              color: CozyTheme.mint,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 6),
           Text(
-            'Quietness heatmap',
+            'Calmer zones',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -175,7 +263,7 @@ class _MapScreenState extends State<MapScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Colors.white.withOpacity(0.92),
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
@@ -216,57 +304,6 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  List<Widget> _buildMapLabels(Size mapSize) {
-    return [
-      _mapLabel(
-        mapSize,
-        const Offset(0.12, 0.18),
-        'Tivoli Park',
-        CozyTheme.mint,
-      ),
-      _mapLabel(
-        mapSize,
-        const Offset(0.52, 0.33),
-        'Prešeren Sq.',
-        CozyTheme.lavender,
-      ),
-      _mapLabel(
-        mapSize,
-        const Offset(0.74, 0.44),
-        'Rail Station',
-        CozyTheme.peach,
-      ),
-      _mapLabel(
-        mapSize,
-        const Offset(0.78, 0.63),
-        'Metelkova',
-        CozyTheme.peach,
-      ),
-    ];
-  }
-
-  Widget _mapLabel(Size mapSize, Offset anchor, String label, Color color) {
-    return Positioned(
-      left: anchor.dx * mapSize.width,
-      top: anchor.dy * mapSize.height,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.5)),
-        ),
-        child: Text(
-          label,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: CozyTheme.ink),
-        ),
-      ),
-    );
-  }
-
   Widget _buildDestinationChips() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -281,7 +318,7 @@ class _MapScreenState extends State<MapScreen> {
                 label: Text(destination),
                 selected: selected,
                 selectedColor: CozyTheme.lavender.withOpacity(0.6),
-                backgroundColor: Colors.white,
+                backgroundColor: Colors.white.withOpacity(0.9),
                 labelStyle: TextStyle(
                   color: CozyTheme.ink,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
@@ -301,22 +338,41 @@ class _MapScreenState extends State<MapScreen> {
     }
     if (_isCalculating) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.only(bottom: 8),
         child: Card(
           margin: const EdgeInsets.symmetric(horizontal: 20),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CozyTheme.lavender,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  'Calculating…',
-                  style: Theme.of(context).textTheme.titleMedium,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Listening to the city…',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      AnimatedBuilder(
+                        animation: _shimmerController,
+                        builder: (context, _) {
+                          return _ShimmerBar(progress: _shimmerController.value);
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -328,7 +384,7 @@ class _MapScreenState extends State<MapScreen> {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 8),
       child: CozyRouteCard(
         key: ValueKey(_selectedDestination),
         destination: _selectedDestination!,
@@ -363,312 +419,142 @@ class _MapScreenState extends State<MapScreen> {
       _calmScore = calm;
     });
     widget.demoState.registerRoutePlanned();
-    if (!_hasShownPrompt) {
-      _hasShownPrompt = true;
-      await _showNextPermission();
+    if (_activePrompt == null) {
+      _scheduleNextPrompt(const Duration(seconds: 2));
     }
   }
 
-  Future<void> _showNextPermission() async {
-    final candidate = widget.demoState.nextRequest();
-    if (!mounted || candidate == null) {
+  void _scheduleNextPrompt(Duration delay) {
+    _promptTimer?.cancel();
+    _promptTimer = Timer(delay, () {
+      if (!mounted || _activePrompt != null) {
+        return;
+      }
+      final candidate = widget.demoState.nextRequest();
+      if (candidate == null) {
+        return;
+      }
+      setState(() {
+        _activePrompt = candidate;
+      });
+      _autoAdvanceTimer?.cancel();
+      _autoAdvanceTimer = Timer(const Duration(seconds: 10), () {
+        if (!mounted || _activePrompt == null) {
+          return;
+        }
+        _dismissPrompt(showMessage: false);
+      });
+    });
+  }
+
+  void _grantPrompt() {
+    final prompt = _activePrompt;
+    if (prompt == null) {
       return;
     }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return PermissionPromptSheet(
-          item: candidate,
-          phase: widget.demoState.currentPhase,
-          onAllow: () {
-            widget.demoState.grant(candidate.id);
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(this.context).showSnackBar(
-              const SnackBar(content: Text('Permission saved gently.')),
-            );
-          },
-          onDeny: () {
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(this.context).showSnackBar(
-              SnackBar(
-                content:
-                    Text(PrivacyCopy.denialMessage(widget.demoState.currentPhase)),
-              ),
-            );
-          },
-        );
-      },
+    widget.demoState.grant(prompt.id);
+    _dismissPrompt(showMessage: true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Suggestion saved gently.')),
     );
   }
 
-  void _openSettings() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+  void _dismissPrompt({bool showMessage = true}) {
+    if (_activePrompt == null) {
+      return;
+    }
+    setState(() {
+      _activePrompt = null;
+    });
+    _autoAdvanceTimer?.cancel();
+    if (showMessage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            PrivacyCopy.denialMessage(widget.demoState.currentPhase),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 5,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: CozyTheme.muted.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              Text('Demo controls', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Demo Mode',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                  Switch(
-                    value: widget.demoState.demoMode,
-                    activeColor: CozyTheme.mint,
-                    onChanged: (value) {
-                      widget.demoState.toggleDemoMode(value);
-                    },
-                  ),
+        ),
+      );
+    }
+    _scheduleNextPrompt(const Duration(seconds: 12));
+  }
+
+  void _toggleSystemOverview() {
+    setState(() {
+      _showSystemOverview = !_showSystemOverview;
+    });
+  }
+}
+
+class _ShimmerBar extends StatelessWidget {
+  final double progress;
+
+  const _ShimmerBar({
+    required this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 8,
+      decoration: BoxDecoration(
+        color: CozyTheme.cream,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Align(
+          alignment: Alignment(-1 + (progress * 2), 0),
+          child: Container(
+            width: 80,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  CozyTheme.lavender.withOpacity(0.6),
+                  Colors.transparent,
                 ],
               ),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: CozyTheme.lavender,
-                  foregroundColor: CozyTheme.ink,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-                onPressed: _isRunningScriptedDemo ? null : () => _runScriptedDemo(),
-                child: const Text('Run scripted demo'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: CozyTheme.muted,
-                  side: BorderSide(color: CozyTheme.muted.withOpacity(0.3)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-                onPressed: () {
-                  widget.demoState.reset();
-                  setState(() {
-                    _selectedDestination = null;
-                    _routeMinutes = 0;
-                    _calmScore = 0;
-                    _isCalculating = false;
-                    _hasShownPrompt = false;
-                  });
-                  Navigator.of(context).pop();
-                },
-                child: const Text('Reset demo'),
-              ),
-            ],
+            ),
           ),
-        );
-      },
-    );
-  }
-
-  Future<void> _runScriptedDemo() async {
-    if (!widget.demoState.demoMode) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Turn on Demo Mode to run the script.')),
-      );
-      return;
-    }
-    if (_isRunningScriptedDemo) {
-      return;
-    }
-    _isRunningScriptedDemo = true;
-    Navigator.of(context).pop();
-
-    const destinations = ['Tivoli Park', 'Prešeren Square', 'Metelkova'];
-    await _selectDestination(destinations.first);
-    await Future.delayed(const Duration(milliseconds: 900));
-    await _showNextPermission();
-    await Future.delayed(const Duration(milliseconds: 900));
-    await _showNextPermission();
-    await Future.delayed(const Duration(milliseconds: 900));
-    await _showNextPermission();
-
-    if (!mounted) {
-      _isRunningScriptedDemo = false;
-      return;
-    }
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => AccessCatalogScreen(
-          demoState: widget.demoState,
         ),
       ),
     );
-    _isRunningScriptedDemo = false;
   }
-}
-
-class _MapPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final background = Paint()..color = CozyTheme.cream;
-    canvas.drawRect(Offset.zero & size, background);
-
-    final gridPaint = Paint()
-      ..color = CozyTheme.mint.withOpacity(0.2)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    const gridSize = 40.0;
-    for (double x = 0; x <= size.width; x += gridSize) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-    for (double y = 0; y <= size.height; y += gridSize) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    final riverPaint = Paint()
-      ..color = CozyTheme.lavender.withOpacity(0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 16
-      ..strokeCap = StrokeCap.round;
-    final riverPath = Path()
-      ..moveTo(size.width * 0.02, size.height * 0.22)
-      ..quadraticBezierTo(
-        size.width * 0.28,
-        size.height * 0.12,
-        size.width * 0.52,
-        size.height * 0.28,
-      )
-      ..quadraticBezierTo(
-        size.width * 0.68,
-        size.height * 0.45,
-        size.width * 0.96,
-        size.height * 0.7,
-      );
-    canvas.drawPath(riverPath, riverPaint);
-
-    final parkPaint = Paint()
-      ..color = CozyTheme.mint.withOpacity(0.35)
-      ..style = PaintingStyle.fill;
-    final tivoliRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(size.width * 0.08, size.height * 0.12,
-          size.width * 0.22, size.height * 0.18),
-      const Radius.circular(22),
-    );
-    canvas.drawRRect(tivoliRect, parkPaint);
-
-    final plazaPaint = Paint()
-      ..color = CozyTheme.peach.withOpacity(0.3)
-      ..style = PaintingStyle.fill;
-    final plazaRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(size.width * 0.47, size.height * 0.28,
-          size.width * 0.12, size.height * 0.08),
-      const Radius.circular(16),
-    );
-    canvas.drawRRect(plazaRect, plazaPaint);
-
-    final streetPaint = Paint()
-      ..color = CozyTheme.peach.withOpacity(0.25)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round;
-
-    final streets = [
-      [
-        Offset(size.width * 0.08, size.height * 0.75),
-        Offset(size.width * 0.38, size.height * 0.6),
-      ],
-      [
-        Offset(size.width * 0.18, size.height * 0.42),
-        Offset(size.width * 0.58, size.height * 0.4),
-      ],
-      [
-        Offset(size.width * 0.6, size.height * 0.15),
-        Offset(size.width * 0.88, size.height * 0.33),
-      ],
-      [
-        Offset(size.width * 0.28, size.height * 0.9),
-        Offset(size.width * 0.82, size.height * 0.8),
-      ],
-      [
-        Offset(size.width * 0.5, size.height * 0.55),
-        Offset(size.width * 0.8, size.height * 0.64),
-      ],
-      [
-        Offset(size.width * 0.35, size.height * 0.22),
-        Offset(size.width * 0.62, size.height * 0.28),
-      ],
-    ];
-    for (final segment in streets) {
-      canvas.drawLine(segment.first, segment.last, streetPaint);
-    }
-
-    final bridgePaint = Paint()
-      ..color = CozyTheme.ink.withOpacity(0.08)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawLine(
-      Offset(size.width * 0.45, size.height * 0.3),
-      Offset(size.width * 0.52, size.height * 0.28),
-      bridgePaint,
-    );
-    canvas.drawLine(
-      Offset(size.width * 0.6, size.height * 0.45),
-      Offset(size.width * 0.66, size.height * 0.48),
-      bridgePaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _HeatmapPainter extends CustomPainter {
+  final double pulse;
+
+  const _HeatmapPainter({
+    required this.pulse,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
     final blobs = <_HeatBlob>[
-      _HeatBlob(Offset(size.width * 0.55, size.height * 0.35), 90, 0.35),
-      _HeatBlob(Offset(size.width * 0.65, size.height * 0.42), 70, 0.3),
-      _HeatBlob(Offset(size.width * 0.75, size.height * 0.5), 80, 0.32),
-      _HeatBlob(Offset(size.width * 0.4, size.height * 0.45), 60, 0.22),
-      _HeatBlob(Offset(size.width * 0.3, size.height * 0.6), 65, 0.2),
-      _HeatBlob(Offset(size.width * 0.85, size.height * 0.3), 75, 0.28),
-      _HeatBlob(Offset(size.width * 0.2, size.height * 0.2), 100, 0.12),
-      _HeatBlob(Offset(size.width * 0.18, size.height * 0.18), 80, 0.1),
-      _HeatBlob(Offset(size.width * 0.15, size.height * 0.25), 60, 0.08),
-      _HeatBlob(Offset(size.width * 0.55, size.height * 0.7), 70, 0.25),
+      _HeatBlob(Offset(size.width * 0.55, size.height * 0.35), 110, 0.2),
+      _HeatBlob(Offset(size.width * 0.65, size.height * 0.42), 90, 0.26),
+      _HeatBlob(Offset(size.width * 0.75, size.height * 0.5), 120, 0.22),
+      _HeatBlob(Offset(size.width * 0.4, size.height * 0.45), 100, 0.18),
+      _HeatBlob(Offset(size.width * 0.3, size.height * 0.6), 120, 0.14),
+      _HeatBlob(Offset(size.width * 0.18, size.height * 0.2), 140, 0.1),
+      _HeatBlob(Offset(size.width * 0.52, size.height * 0.72), 130, 0.16),
     ];
 
     for (final blob in blobs) {
+      final intensity = (blob.intensity + (pulse * 0.08)).clamp(0.05, 0.45);
       final paint = Paint()
-        ..color = CozyTheme.peach.withOpacity(blob.intensity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 40);
+        ..color = CozyTheme.mint.withOpacity(intensity)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 70);
       canvas.drawCircle(blob.center, blob.radius, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _HeatmapPainter oldDelegate) {
+    return oldDelegate.pulse != pulse;
+  }
 }
 
 class _RoutePainter extends CustomPainter {
