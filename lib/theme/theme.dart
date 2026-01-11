@@ -41,7 +41,7 @@ class CozyTheme {
           color: muted,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 6,
         shape: RoundedRectangleBorder(
