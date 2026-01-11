@@ -8,9 +8,9 @@ import '../access_catalog.dart';
 import '../privacy_copy.dart';
 import '../state/demo_state.dart';
 import '../theme/theme.dart';
-import '../widgets/cozy_route_card.dart';
-import '../widgets/cozy_top_bar.dart';
-import '../widgets/permission_prompt_sheet.dart';
+import '../widgets/permission_prompt.dart';
+import '../widgets/route_card.dart';
+import '../widgets/top_bar.dart';
 import 'access_catalog_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -27,26 +27,10 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
-  static const String _mapStyle = '''
-{
-  "version": 8,
-  "sources": {
-    "osm": {
-      "type": "raster",
-      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      "tileSize": 256,
-      "attribution": "© OpenStreetMap contributors"
-    }
-  },
-  "layers": [
-    {
-      "id": "osm",
-      "type": "raster",
-      "source": "osm"
-    }
-  ]
-}
-''';
+  static const String _mapStyleUrl =
+      'https://api.maptiler.com/maps/streets/style.json?key=PEK7V4X8DK3A0P2AIZdI';
+  static const String _fallbackMapUrl =
+      'https://api.maptiler.com/maps/streets/static/14.5058,46.0569,13.5/1280x720.png?key=PEK7V4X8DK3A0P2AIZdI';
 
   final List<String> _destinations = const [
     'Tivoli Park',
@@ -62,9 +46,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   AccessItem? _activePrompt;
   bool _showSystemOverview = false;
+  bool _mapLoaded = false;
+  bool _showFallback = false;
 
   Timer? _promptTimer;
   Timer? _autoAdvanceTimer;
+  Timer? _fallbackTimer;
 
   late final AnimationController _pulseController;
   late final AnimationController _shimmerController;
@@ -81,12 +68,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1800),
     )..repeat();
     _scheduleNextPrompt(const Duration(seconds: 4));
+    _fallbackTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted || _mapLoaded) {
+        return;
+      }
+      setState(() {
+        _showFallback = true;
+      });
+    });
   }
 
   @override
   void dispose() {
     _promptTimer?.cancel();
     _autoAdvanceTimer?.cancel();
+    _fallbackTimer?.cancel();
     _pulseController.dispose();
     _shimmerController.dispose();
     super.dispose();
@@ -98,14 +94,42 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       body: Stack(
         children: [
           MapLibreMap(
-            styleString: _mapStyle,
+            styleString: _mapStyleUrl,
             initialCameraPosition: const CameraPosition(
               target: _ljubljanaCenter,
-              zoom: 13.6,
+              zoom: 13.5,
             ),
             minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
             compassEnabled: false,
+            onStyleLoadedCallback: () {
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                _mapLoaded = true;
+                _showFallback = false;
+              });
+            },
           ),
+          if (_showFallback)
+            Positioned.fill(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 600),
+                opacity: _showFallback ? 1 : 0,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      _fallbackMapUrl,
+                      fit: BoxFit.cover,
+                    ),
+                    Container(
+                      color: CozyTheme.cream.withOpacity(0.08),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Positioned.fill(
             child: IgnorePointer(
               child: AnimatedBuilder(
@@ -132,7 +156,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           SafeArea(
             child: Column(
               children: [
-                CozyTopBar(onSettings: _toggleSystemOverview),
+                TopBar(onSystemOverview: _toggleSystemOverview),
                 _buildDestinationChips(),
                 _buildStatusStrip(),
                 const Spacer(),
@@ -157,7 +181,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               alignment: Alignment.center,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: PermissionPromptSheet(
+                child: PermissionPrompt(
                   item: _activePrompt!,
                   phase: widget.demoState.currentPhase,
                   onAllow: _grantPrompt,
@@ -171,7 +195,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: GestureDetector(
                 onTap: _toggleSystemOverview,
                 child: Container(
-                  color: Colors.black.withOpacity(0.15),
+                  color: Colors.black.withOpacity(0.18),
                 ),
               ),
             ),
@@ -385,7 +409,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: CozyRouteCard(
+      child: RouteCard(
         key: ValueKey(_selectedDestination),
         destination: _selectedDestination!,
         minutes: _routeMinutes,
@@ -412,7 +436,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final minutes = 12 + random.nextInt(14);
     final calm = destination == 'Tivoli Park'
         ? 86 + random.nextInt(8)
-        : 55 + random.nextInt(30);
+        : destination == 'Prešeren Square'
+            ? 62 + random.nextInt(18)
+            : 45 + random.nextInt(20);
     setState(() {
       _isCalculating = false;
       _routeMinutes = minutes;
@@ -533,13 +559,13 @@ class _HeatmapPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final blobs = <_HeatBlob>[
-      _HeatBlob(Offset(size.width * 0.55, size.height * 0.35), 110, 0.2),
-      _HeatBlob(Offset(size.width * 0.65, size.height * 0.42), 90, 0.26),
-      _HeatBlob(Offset(size.width * 0.75, size.height * 0.5), 120, 0.22),
-      _HeatBlob(Offset(size.width * 0.4, size.height * 0.45), 100, 0.18),
-      _HeatBlob(Offset(size.width * 0.3, size.height * 0.6), 120, 0.14),
-      _HeatBlob(Offset(size.width * 0.18, size.height * 0.2), 140, 0.1),
-      _HeatBlob(Offset(size.width * 0.52, size.height * 0.72), 130, 0.16),
+      _HeatBlob(Offset(size.width * 0.56, size.height * 0.36), 120, 0.22),
+      _HeatBlob(Offset(size.width * 0.64, size.height * 0.42), 100, 0.26),
+      _HeatBlob(Offset(size.width * 0.76, size.height * 0.5), 130, 0.2),
+      _HeatBlob(Offset(size.width * 0.42, size.height * 0.52), 110, 0.18),
+      _HeatBlob(Offset(size.width * 0.3, size.height * 0.6), 130, 0.14),
+      _HeatBlob(Offset(size.width * 0.22, size.height * 0.22), 150, 0.1),
+      _HeatBlob(Offset(size.width * 0.5, size.height * 0.72), 140, 0.16),
     ];
 
     for (final blob in blobs) {

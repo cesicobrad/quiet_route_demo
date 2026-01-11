@@ -8,7 +8,6 @@ class DemoState extends ChangeNotifier {
   final Set<AccessItemId> _granted = {};
   int _routesPlanned = 0;
   bool _demoMode = true;
-  int _grantsInPhase = 0;
 
   PrivacyPhase get currentPhase => _currentPhase;
   Set<AccessItemId> get granted => _granted;
@@ -25,7 +24,6 @@ class DemoState extends ChangeNotifier {
     _granted.clear();
     _routesPlanned = 0;
     _demoMode = true;
-    _grantsInPhase = 0;
     notifyListeners();
   }
 
@@ -63,18 +61,9 @@ class DemoState extends ChangeNotifier {
       return;
     }
     _granted.add(id);
-    _grantsInPhase += 1;
-    _advancePhaseIfReady();
-    notifyListeners();
-  }
-
-  void _advancePhaseIfReady() {
-    if (_currentPhase.isMax) {
-      return;
-    }
-    if (_grantsInPhase >= 2) {
-      _grantsInPhase = 0;
+    if (!_currentPhase.isMax) {
       _currentPhase = _currentPhase.next();
     }
+    notifyListeners();
   }
 }
