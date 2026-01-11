@@ -81,7 +81,7 @@ class PermissionPromptSheet extends StatelessWidget {
                     ),
                   ),
                   onPressed: onDeny,
-                  child: const Text('Not right now'),
+                  child: const Text('Maybe later'),
                 ),
               ),
             ],
