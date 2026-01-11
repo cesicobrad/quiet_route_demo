@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../access_catalog.dart';
 import '../privacy_copy.dart';
+import '../privacy_phase.dart';
 import '../state/demo_state.dart';
 import '../theme/theme.dart';
 
