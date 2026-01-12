@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
@@ -62,20 +64,29 @@ class _HeatPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final blobs = <_HeatBlob>[
-      _HeatBlob(Offset(size.width * 0.22, size.height * 0.32), 140, 0.14),
-      _HeatBlob(Offset(size.width * 0.42, size.height * 0.48), 160, 0.18),
-      _HeatBlob(Offset(size.width * 0.68, size.height * 0.4), 150, 0.16),
-      _HeatBlob(Offset(size.width * 0.74, size.height * 0.62), 180, 0.2),
-      _HeatBlob(Offset(size.width * 0.36, size.height * 0.72), 170, 0.17),
+      _HeatBlob(Offset(size.width * 0.18, size.height * 0.28), 120, 0.12, 0.8),
+      _HeatBlob(Offset(size.width * 0.32, size.height * 0.42), 160, 0.18, 1.2),
+      _HeatBlob(Offset(size.width * 0.46, size.height * 0.55), 140, 0.16, 1.5),
+      _HeatBlob(Offset(size.width * 0.6, size.height * 0.36), 130, 0.14, 0.9),
+      _HeatBlob(Offset(size.width * 0.7, size.height * 0.52), 170, 0.2, 1.1),
+      _HeatBlob(Offset(size.width * 0.8, size.height * 0.68), 150, 0.17, 1.4),
+      _HeatBlob(Offset(size.width * 0.52, size.height * 0.74), 180, 0.19, 0.7),
+      _HeatBlob(Offset(size.width * 0.28, size.height * 0.66), 150, 0.16, 1.3),
+      _HeatBlob(Offset(size.width * 0.12, size.height * 0.54), 120, 0.13, 1.6),
+      _HeatBlob(Offset(size.width * 0.62, size.height * 0.22), 110, 0.12, 1.0),
     ];
 
     for (final blob in blobs) {
+      final drift = Offset(
+        sin((pulse * 2 * pi) + blob.phase) * 6,
+        cos((pulse * 2 * pi) + blob.phase) * 6,
+      );
       final intensity =
-          (blob.intensity + (pulse * 0.08)).clamp(0.08, 0.32);
+          (blob.intensity + (pulse * 0.08)).clamp(0.08, 0.3);
       final paint = Paint()
         ..color = CozyTheme.peach.withOpacity(intensity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 60);
-      canvas.drawCircle(blob.center, blob.radius, paint);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 70);
+      canvas.drawCircle(blob.center + drift, blob.radius, paint);
     }
   }
 
@@ -90,5 +101,7 @@ class _HeatBlob {
   final double radius;
   final double intensity;
 
-  const _HeatBlob(this.center, this.radius, this.intensity);
+  final double phase;
+
+  const _HeatBlob(this.center, this.radius, this.intensity, this.phase);
 }

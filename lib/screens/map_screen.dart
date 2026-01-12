@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,6 +5,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../services/routing_service.dart';
 import '../state/playback_state.dart';
+import '../state/route_progress_controller.dart';
 import '../theme/theme.dart';
 import '../widgets/gps_pip.dart';
 import '../widgets/heat_overlay.dart';
@@ -29,7 +29,8 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen>
     with TickerProviderStateMixin {
   static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
-  static const LatLng _tivoliDestination = LatLng(46.0597, 14.4911);
+  static const LatLng _startLocation = LatLng(46.0511, 14.5060);
+  static const LatLng _tivoliDestination = LatLng(46.0593, 14.4976);
   static const double _defaultZoom = 13.5;
   static const double _routeCardHeight = 220;
   static const String _mapStyleUrl =
@@ -56,12 +57,13 @@ class _MapScreenState extends State<MapScreen>
 
   int _lastRouteRequestId = 0;
   Line? _routeLine;
+  Line? _progressLine;
   List<LatLng> _routePoints = [];
-  Timer? _gpsTimer;
-  int _gpsRouteIndex = 0;
-  Offset? _gpsScreenOffset;
+  final RouteProgressController _progressController =
+      RouteProgressController();
 
   bool _destinationSheetOpen = false;
+  bool _hasStartedRoute = false;
 
   @override
   void initState() {
@@ -78,7 +80,7 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   void dispose() {
-    _gpsTimer?.cancel();
+    _progressController.stop();
     widget.playbackState.removeListener(_handlePlaybackUpdates);
     super.dispose();
   }
@@ -97,6 +99,10 @@ class _MapScreenState extends State<MapScreen>
       _lastRouteRequestId = state.routeRequestId;
       _recalculateRoute();
     }
+    if (!state.isPlaying && _hasStartedRoute) {
+      _hasStartedRoute = false;
+      _progressController.stop();
+    }
   }
 
   @override
@@ -112,23 +118,17 @@ class _MapScreenState extends State<MapScreen>
               Positioned.fill(
                 child: DisturbanceHeatOverlay(show: state.showHeat),
               ),
-              if (_gpsScreenOffset == null)
-                Align(
-                  alignment: const Alignment(0, 0.55),
-                  child: ScreenPinnedGpsPip(
-                    showTwin: state.showTwin,
-                    twinOpacity: state.twinOpacity,
-                  ),
-                )
-              else
-                Positioned(
-                  left: _gpsScreenOffset!.dx - 8,
-                  top: _gpsScreenOffset!.dy - 8,
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: _routeCardHeight + 28,
+                child: Center(
                   child: ScreenPinnedGpsPip(
                     showTwin: state.showTwin,
                     twinOpacity: state.twinOpacity,
                   ),
                 ),
+              ),
               SafeArea(
                 child: Column(
                   children: [
@@ -154,7 +154,7 @@ class _MapScreenState extends State<MapScreen>
                           isCalculating: state.routeCalculating,
                           isPlaying: state.isPlaying,
                           statusText: state.bottomStatusText,
-                          onStart: state.startPlayback,
+                          onStart: _handleStartRoute,
                         ),
                       ),
                     ),
@@ -198,7 +198,7 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     final camera = await controller.cameraPosition;
-    final from = camera?.target ?? _ljubljanaCenter;
+    final from = camera?.target ?? _startLocation;
     final route = await _routingService.getWalkingRoute(from, _tivoliDestination);
     await _drawRoute(route);
     widget.playbackState.applyRouteResult(minutes: 18, calmScore: 82);
@@ -213,41 +213,85 @@ class _MapScreenState extends State<MapScreen>
       await controller.removeLine(_routeLine!);
       _routeLine = null;
     }
+    if (_progressLine != null) {
+      await controller.removeLine(_progressLine!);
+      _progressLine = null;
+    }
     final line = await controller.addLine(
       LineOptions(
         geometry: route,
         lineColor: '#2C2C2C',
-        lineWidth: 4,
-        lineOpacity: 0.6,
+        lineWidth: 5,
+        lineOpacity: 0.35,
       ),
     );
     _routeLine = line;
     _routePoints = route;
-    _startGpsAnimation();
+    _progressLine = await controller.addLine(
+      LineOptions(
+        geometry: route.take(2).toList(),
+        lineColor: '#2C2C2C',
+        lineWidth: 6,
+        lineOpacity: 0.85,
+      ),
+    );
+    _startRouteProgress();
   }
 
-  void _startGpsAnimation() {
-    _gpsTimer?.cancel();
-    if (_routePoints.length < 2 || _mapController == null) {
+  void _startRouteProgress() {
+    final controller = _mapController;
+    if (_routePoints.length < 2 || controller == null) {
       return;
     }
-    _gpsRouteIndex = 0;
-    _gpsTimer = Timer.periodic(const Duration(milliseconds: 700), (_) async {
-      final controller = _mapController;
-      if (controller == null || _gpsRouteIndex >= _routePoints.length) {
-        _gpsTimer?.cancel();
-        return;
-      }
-      final point = _routePoints[_gpsRouteIndex];
-      final screenPoint = await controller.toScreenLocation(point);
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _gpsScreenOffset = Offset(screenPoint.x.toDouble(), screenPoint.y.toDouble());
-      });
-      _gpsRouteIndex += 1;
-    });
+    _progressController.start(
+      route: _routePoints,
+      totalDuration: const Duration(seconds: 60),
+      onProgress: (progress) async {
+        final progressLine = _progressLine;
+        if (progressLine != null) {
+          final segment =
+              _routePoints.take(progress.index + 1).toList(growable: false);
+          await controller.updateLine(
+            progressLine,
+            LineOptions(geometry: segment),
+          );
+        }
+        await controller.animateCamera(
+          CameraUpdate.newLatLng(progress.position),
+        );
+        final total = _routePoints.length;
+        final remainingRatio =
+            (total - progress.index).clamp(0, total) / total;
+        final remainingMinutes =
+            max(1, (18 * remainingRatio).round());
+        widget.playbackState.updateRouteProgress(
+          remainingMinutes: remainingMinutes,
+          statusText: 'Moving…',
+        );
+      },
+    );
+  }
+
+  Future<void> _handleStartRoute() async {
+    if (_hasStartedRoute) {
+      return;
+    }
+    _hasStartedRoute = true;
+    final controller = _mapController;
+    if (controller != null) {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(_startLocation, _defaultZoom),
+      );
+    }
+    widget.playbackState.destination = 'Tivoli Park';
+    widget.playbackState.bottomStatusText = 'Calculating route…';
+    widget.playbackState.routeCalculating = true;
+    widget.playbackState.notifyListeners();
+    widget.playbackState.startPlayback();
+    widget.playbackState.requestRoute(
+      statusText: 'Calculating route…',
+      showSpinner: true,
+    );
   }
 
   Future<void> _openDestinationSheet() async {

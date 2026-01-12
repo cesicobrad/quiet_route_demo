@@ -116,6 +116,17 @@ class PlaybackState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateRouteProgress({
+    required int remainingMinutes,
+    String? statusText,
+  }) {
+    routeMinutes = remainingMinutes;
+    if (statusText != null) {
+      bottomStatusText = statusText;
+    }
+    notifyListeners();
+  }
+
   void showInfoCard({required String title, required String body}) {
     activeCard = OverlayCardData(
       type: OverlayCardType.info,

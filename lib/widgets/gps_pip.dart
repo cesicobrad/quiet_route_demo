@@ -40,8 +40,8 @@ class _ScreenPinnedGpsPipState extends State<ScreenPinnedGpsPip>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final pulse = 1 + (_controller.value * 0.25);
-        final opacity = 0.2 + (_controller.value * 0.2);
+        final pulse = 1 + (_controller.value * 0.18);
+        final opacity = 0.16 + (_controller.value * 0.18);
         return Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
@@ -49,8 +49,8 @@ class _ScreenPinnedGpsPipState extends State<ScreenPinnedGpsPip>
             Transform.scale(
               scale: pulse,
               child: Container(
-                width: 32,
-                height: 32,
+                width: 54,
+                height: 54,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: CozyTheme.mint.withOpacity(opacity),

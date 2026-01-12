@@ -92,8 +92,8 @@ class RoutingService {
   }
 
   List<LatLng> _fallbackLine() {
-    const start = LatLng(46.0569, 14.5058);
-    const end = LatLng(46.0597, 14.4911);
+    const start = LatLng(46.0511, 14.5060);
+    const end = LatLng(46.0593, 14.4976);
     final points = <LatLng>[];
     for (var i = 0; i <= 32; i++) {
       final t = i / 32;
