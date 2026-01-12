@@ -68,6 +68,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
+        fit: StackFit.expand,
         children: [
           const RepaintBoundary(child: StableMapView()),
           const Positioned.fill(child: DisturbanceHeatOverlay()),
