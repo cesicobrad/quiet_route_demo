@@ -4,23 +4,57 @@ import 'package:flutter/material.dart';
 
 import '../access_catalog.dart';
 import '../privacy_copy.dart';
-import '../state/demo_state.dart';
+import '../state/playback_state.dart';
 import '../theme/theme.dart';
 
-class AccessCatalogScreen extends StatelessWidget {
-  final DemoState demoState;
+class SystemScreen extends StatefulWidget {
+  final PlaybackState playbackState;
   final VoidCallback onClose;
+  final bool autoScroll;
 
-  const AccessCatalogScreen({
+  const SystemScreen({
     super.key,
-    required this.demoState,
+    required this.playbackState,
     required this.onClose,
+    this.autoScroll = false,
   });
+
+  @override
+  State<SystemScreen> createState() => _SystemScreenState();
+}
+
+class _SystemScreenState extends State<SystemScreen> {
+  final ScrollController _scrollController = ScrollController();
+  bool _didAutoScroll = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.autoScroll && !_didAutoScroll) {
+      _didAutoScroll = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) {
+          return;
+        }
+        _scrollController.animateTo(
+          120,
+          duration: const Duration(milliseconds: 900),
+          curve: Curves.easeInOut,
+        );
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final total = AccessCatalog.items.length;
-    final grantedCount = demoState.granted.length;
+    final grantedCount = widget.playbackState.collectedSignalsCount;
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = min(constraints.maxHeight * 0.75, 520.0);
@@ -46,12 +80,40 @@ class AccessCatalogScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'System Overview',
+                      'System',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
+                  PopupMenuButton<_SystemAction>(
+                    icon: const Icon(Icons.settings_outlined),
+                    onSelected: (value) {
+                      switch (value) {
+                        case _SystemAction.reset:
+                          widget.playbackState.reset();
+                          widget.onClose();
+                          break;
+                        case _SystemAction.stop:
+                          widget.playbackState.stopPlayback();
+                          widget.onClose();
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) {
+                      return [
+                        const PopupMenuItem(
+                          value: _SystemAction.reset,
+                          child: Text('Reset'),
+                        ),
+                        if (widget.playbackState.isPlaying)
+                          const PopupMenuItem(
+                            value: _SystemAction.stop,
+                            child: Text('Stop'),
+                          ),
+                      ];
+                    },
+                  ),
                   IconButton(
-                    onPressed: onClose,
+                    onPressed: widget.onClose,
                     icon: const Icon(Icons.close_rounded),
                     color: CozyTheme.muted,
                   ),
@@ -65,11 +127,12 @@ class AccessCatalogScreen extends StatelessWidget {
               const SizedBox(height: 14),
               Expanded(
                 child: ListView.separated(
+                  controller: _scrollController,
                   itemCount: AccessCatalog.items.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final item = AccessCatalog.items[index];
-                    final isGranted = demoState.granted.contains(item.id);
+                    final isGranted = widget.playbackState.hasSignal(item.id);
                     return Opacity(
                       opacity: isGranted ? 1 : 0.5,
                       child: Container(
@@ -110,12 +173,14 @@ class AccessCatalogScreen extends StatelessWidget {
                                 children: [
                                   Text(
                                     item.title,
-                                    style: Theme.of(context).textTheme.titleMedium,
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium,
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
                                     item.shortDescription,
-                                    style: Theme.of(context).textTheme.bodySmall,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
@@ -135,7 +200,7 @@ class AccessCatalogScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Text(
-                  PrivacyCopy.patternFooter(demoState.currentPhase),
+                  PrivacyCopy.patternFooter(widget.playbackState.currentPhase),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
@@ -146,3 +211,5 @@ class AccessCatalogScreen extends StatelessWidget {
     );
   }
 }
+
+enum _SystemAction { reset, stop }

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quiet Route</title>
+    <link
+      href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="map"></div>
+      <canvas id="heatmap"></canvas>
+
+      <header class="top-bar">
+        <div class="title">Quiet Route</div>
+        <div class="top-actions">
+          <button class="icon-button" id="destinationsBtn" aria-label="Destinations">
+            <span>⌖</span>
+          </button>
+          <button class="icon-button" id="systemBtn" aria-label="System">
+            <span>☰</span>
+            <span class="badge" id="signalsBadge">0</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="gps-pip" id="gpsPip">
+        <div class="pip-halo"></div>
+        <div class="pip-core"></div>
+        <div class="twin" id="twinMarker">
+          <span>◎</span>
+          <span>Twin</span>
+        </div>
+      </div>
+
+      <div class="center-host" id="centerHost"></div>
+
+      <div class="route-card" id="routeCard">
+        <div class="route-header">
+          <div>
+            <div class="route-title">Quiet Route</div>
+            <div class="route-destination" id="routeDestination">Tivoli Park</div>
+          </div>
+          <div class="consent-meter" id="consentMeter">Consent: 0/∞</div>
+        </div>
+        <div class="route-metrics">
+          <span class="chip" id="routeEta">18 min</span>
+          <span class="chip" id="routeCalm">Calm 82</span>
+        </div>
+        <div class="route-status" id="routeStatus">Ready to plan your route.</div>
+        <button class="primary" id="startBtn">Start route</button>
+      </div>
+
+      <div class="system-overlay" id="systemOverlay">
+        <div class="system-card">
+          <div class="system-header">
+            <h3>System</h3>
+            <button class="icon-button" id="closeSystem">✕</button>
+          </div>
+          <div class="system-summary" id="systemSummary">Collected signals: 0 / 12</div>
+          <ul class="system-list" id="systemList"></ul>
+          <div class="system-footer">Calm summaries stay on this device.</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
