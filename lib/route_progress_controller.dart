@@ -35,13 +35,14 @@ class RouteProgressController {
         _routePoints = routePoints,
         _metricsNotifier = metricsNotifier,
         _totalDuration = totalDuration,
-        _ticker = vsync.createTicker(_onTick);
+        _tickerProvider = vsync;
 
   final MapLibreMapController _mapController;
   final List<LatLng> _routePoints;
   final ValueNotifier<RouteMetrics> _metricsNotifier;
   final Duration _totalDuration;
-  final Ticker _ticker;
+  final TickerProvider _tickerProvider;
+  late final Ticker _ticker = _tickerProvider.createTicker(_onTick);
 
   Line? _fullRouteLine;
   Line? _traveledLine;
@@ -61,8 +62,6 @@ class RouteProgressController {
         lineColor: '#7F8CFF',
         lineOpacity: 0.4,
         lineWidth: 6,
-        lineJoin: 'round',
-        lineCap: 'round',
       ),
     );
     _traveledLine = await _mapController.addLine(
@@ -71,8 +70,6 @@ class RouteProgressController {
         lineColor: '#6AD9C1',
         lineOpacity: 0.9,
         lineWidth: 6,
-        lineJoin: 'round',
-        lineCap: 'round',
       ),
     );
     final totalDistance = _cumulativeDistances.isNotEmpty
