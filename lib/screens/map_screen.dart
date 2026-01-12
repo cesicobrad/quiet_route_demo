@@ -5,13 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../access_catalog.dart';
+import '../gps_pip.dart';
 import '../privacy_copy.dart';
+import '../privacy_phase.dart';
+import '../route_progress_controller.dart';
+import '../routing_service.dart';
+import '../stable_map_view.dart';
 import '../state/demo_state.dart';
 import '../theme/theme.dart';
 import '../widgets/permission_prompt.dart';
-import '../widgets/route_card.dart';
 import '../widgets/top_bar.dart';
-import 'access_catalog_screen.dart';
+
+const double kRouteCardHeight = 182;
 
 class MapScreen extends StatefulWidget {
   final DemoState demoState;
@@ -26,84 +31,36 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
-  static const LatLng _ljubljanaCenter = LatLng(46.0569, 14.5058);
-  static const LatLng _simulatedLocation = LatLng(46.0549, 14.5122);
-  static const double _defaultZoom = 13.5;
-  static const String _mapStyleUrl =
-      'https://api.maptiler.com/maps/streets/style.json?key=PEK7V4X8DK3A0P2AIZdI';
-  static const String _fallbackMapUrl =
-      'https://api.maptiler.com/maps/streets/static/14.5058,46.0569,13.5/1280x720.png?key=PEK7V4X8DK3A0P2AIZdI';
+  static const LatLng _routeStart = LatLng(46.0300, 14.5600);
+  static const LatLng _routeDestination = LatLng(46.0593, 14.4976);
+  static const double _routeStartZoom = 15.2;
+  static const Duration _routeDuration = Duration(seconds: 96);
 
-  final Map<String, String> _destinationSubtitles = const {
-    'Tivoli Park': 'Tree-lined paths and quiet lawns.',
-    'Prešeren Square': 'City center with room to pause.',
-    'Metelkova': 'Creative quarter with tucked-away streets.',
-  };
-
-  final List<String> _destinations = const [
-    'Tivoli Park',
-    'Prešeren Square',
-    'Metelkova',
-  ];
-
-  String? _selectedDestination;
-  bool _isCalculating = false;
-
-  int _routeMinutes = 0;
-  int _calmScore = 0;
+  final RoutingService _routingService = RoutingService();
+  final ValueNotifier<RouteMetrics> _routeMetrics =
+      ValueNotifier<RouteMetrics>(RouteMetrics.initial());
 
   AccessItem? _activePrompt;
-  bool _showSystemOverview = false;
-  bool _mapLoaded = false;
-  bool _showFallback = false;
-  String? _mapErrorMessage;
-
   Timer? _promptTimer;
   Timer? _autoAdvanceTimer;
-  Timer? _fallbackTimer;
 
-  MapLibreMapController? _mapController;
-
-  late final AnimationController _pulseController;
-  late final AnimationController _shimmerController;
-  late final AnimationController _gpsPulseController;
+  RouteProgressController? _routeProgressController;
+  bool _isRouteLoading = false;
+  bool _routeStarted = false;
+  int _consentCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 8),
-    )..repeat(reverse: true);
-    _shimmerController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-    _gpsPulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
     _scheduleNextPrompt(const Duration(seconds: 4));
-    _fallbackTimer = Timer(const Duration(seconds: 12), () {
-      if (!mounted || _mapLoaded) {
-        return;
-      }
-      setState(() {
-        _showFallback = true;
-        _mapErrorMessage =
-            'Map is taking longer than expected. Showing a static preview.';
-      });
-    });
   }
 
   @override
   void dispose() {
     _promptTimer?.cancel();
     _autoAdvanceTimer?.cancel();
-    _fallbackTimer?.cancel();
-    _pulseController.dispose();
-    _shimmerController.dispose();
-    _gpsPulseController.dispose();
+    _routeProgressController?.dispose();
+    _routeMetrics.dispose();
     super.dispose();
   }
 
@@ -112,481 +69,102 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(
-            child: MapLibreMap(
-              styleString: _mapStyleUrl,
-              initialCameraPosition: const CameraPosition(
-                target: _ljubljanaCenter,
-                zoom: _defaultZoom,
-              ),
-              minMaxZoomPreference: const MinMaxZoomPreference(11, 18),
-              compassEnabled: false,
-              onMapCreated: (controller) {
-                _mapController = controller;
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _mapErrorMessage = null;
-                });
-              },
-              onStyleLoadedCallback: () {
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _mapLoaded = true;
-                  _showFallback = false;
-                  _mapErrorMessage = null;
-                });
-              },
-            ),
-          ),
-          if (_showFallback)
-            Positioned.fill(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.network(
-                    _fallbackMapUrl,
-                    fit: BoxFit.cover,
-                  ),
-                  Container(
-                    color: CozyTheme.cream.withOpacity(0.08),
-                  ),
-                ],
-              ),
-            ),
-          Positioned.fill(
+          const RepaintBoundary(child: StableMapView()),
+          const Positioned.fill(child: DisturbanceHeatOverlay()),
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: kRouteCardHeight + 28,
             child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, _) {
-                  return CustomPaint(
-                    painter: _HeatmapPainter(pulse: _pulseController.value),
-                  );
-                },
-              ),
+              child: Center(child: ScreenPinnedGpsPip()),
             ),
           ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: _RoutePainter(
-                  destination: _selectedDestination,
-                  showRoute:
-                      !_isCalculating && _selectedDestination != null && _routeMinutes > 0,
-                ),
-              ),
-            ),
+          const TopBar(),
+          CenterOverlayHost(
+            activePrompt: _activePrompt,
+            phase: widget.demoState.currentPhase,
+            onAllow: _grantPrompt,
+            onContinue: _handleMaybeLater,
+            onDismiss: _handleMaybeLater,
           ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: _buildLocationPip(),
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                TopBar(
-                  onSystemOverview: _toggleSystemOverview,
-                  onDestinations: _openDestinationSheet,
-                ),
-                _buildStatusStrip(),
-                const Spacer(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _legendBadge(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 350),
-                  child: _buildRouteCard(),
-                ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-          Positioned(
-            right: 20,
-            bottom: 24,
-            child: SafeArea(
-              child: _buildRecenterButton(),
-            ),
-          ),
-          Positioned(
-            top: 12,
-            left: 12,
-            child: SafeArea(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: CozyTheme.ink.withOpacity(0.08),
-                      blurRadius: 10,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  'Map widget mounted',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: CozyTheme.ink),
-                ),
-              ),
-            ),
-          ),
-          if (_mapErrorMessage != null)
-            Positioned(
-              left: 20,
-              right: 20,
-              top: 84,
-              child: SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: CozyTheme.ink.withOpacity(0.12),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.warning_amber_rounded,
-                          color: CozyTheme.peach),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _mapErrorMessage!,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (_activePrompt != null)
-            Align(
-              alignment: Alignment.center,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: PermissionPrompt(
-                  item: _activePrompt!,
-                  phase: widget.demoState.currentPhase,
-                  onAllow: _grantPrompt,
-                  onContinue: () => _dismissPrompt(showMessage: false),
-                  onDismiss: () => _dismissPrompt(showMessage: false),
-                ),
-              ),
-            ),
-          if (_showSystemOverview)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleSystemOverview,
-                child: Container(
-                  color: Colors.black.withOpacity(0.18),
-                ),
-              ),
-            ),
-          if (_showSystemOverview)
-            Positioned.fill(
-              child: SafeArea(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: AccessCatalogScreen(
-                    demoState: widget.demoState,
-                    onClose: _toggleSystemOverview,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _legendBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: CozyTheme.ink.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: CozyTheme.mint,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'Calmer zones',
-            style: Theme.of(context).textTheme.bodySmall,
+          BottomRouteCard(
+            isLoading: _isRouteLoading,
+            routeStarted: _routeStarted,
+            metricsNotifier: _routeMetrics,
+            consentCount: _consentCount,
+            totalConsents: AccessCatalog.items.length,
+            collectedSignals: widget.demoState.granted.length,
+            onStartRoute: _startRoute,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatusStrip() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      child: Row(
-        children: [
-          _statusPill(
-            label: 'Quietness',
-            value: _selectedDestination == null ? '82' : '$_calmScore',
-            color: CozyTheme.mint,
-          ),
-          const SizedBox(width: 10),
-          _statusPill(
-            label: 'Air',
-            value: 'Fresh',
-            color: CozyTheme.lavender,
-          ),
-          const SizedBox(width: 10),
-          _statusPill(
-            label: 'Crowds',
-            value: 'Low',
-            color: CozyTheme.peach,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusPill({
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.92),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: CozyTheme.ink.withOpacity(0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  value,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontSize: 16),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLocationPip() {
-    return AnimatedBuilder(
-      animation: _gpsPulseController,
-      builder: (context, _) {
-        final pulse = _gpsPulseController.value;
-        final pulseSize = 34 + (pulse * 18);
-        return Align(
-          alignment: const Alignment(0.25, -0.05),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Container(
-                width: pulseSize,
-                height: pulseSize,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: CozyTheme.mint.withOpacity(0.3 * (1 - pulse)),
-                ),
-              ),
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: CozyTheme.mint,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: CozyTheme.ink.withOpacity(0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRecenterButton() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: CozyTheme.ink.withOpacity(0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.my_location_rounded),
-        color: CozyTheme.ink,
-        onPressed: _recenterMap,
-        tooltip: 'Recenter',
-      ),
-    );
-  }
-
-  Widget _buildRouteCard() {
-    if (_selectedDestination == null) {
-      return const SizedBox.shrink();
-    }
-    if (_isCalculating) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Card(
-          margin: const EdgeInsets.symmetric(horizontal: 20),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      CozyTheme.lavender,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Listening to the city…',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 6),
-                      AnimatedBuilder(
-                        animation: _shimmerController,
-                        builder: (context, _) {
-                          return _ShimmerBar(progress: _shimmerController.value);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    if (_routeMinutes == 0) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: RouteCard(
-        key: ValueKey(_selectedDestination),
-        destination: _selectedDestination!,
-        minutes: _routeMinutes,
-        calmScore: _calmScore,
-      ),
-    );
-  }
-
-  Future<void> _selectDestination(String destination) async {
-    if (_isCalculating) {
+  Future<void> _startRoute() async {
+    if (_isRouteLoading || _routeStarted) {
       return;
     }
     setState(() {
-      _selectedDestination = destination;
-      _isCalculating = true;
-      _routeMinutes = 0;
+      _isRouteLoading = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 1100));
+    final mapController = await _awaitMapReady();
+    mapController.animateCamera(
+      CameraUpdate.newLatLngZoom(_routeStart, _routeStartZoom),
+    );
+    await Future.delayed(const Duration(milliseconds: 900));
+
+    final routePoints = await _routingService.fetchWalkingRoute(
+      start: _routeStart,
+      destination: _routeDestination,
+    );
     if (!mounted) {
       return;
     }
-    final random = Random(destination.hashCode);
-    final minutes = 12 + random.nextInt(14);
-    final calm = destination == 'Tivoli Park'
-        ? 86 + random.nextInt(8)
-        : destination == 'Prešeren Square'
-            ? 62 + random.nextInt(18)
-            : 45 + random.nextInt(20);
-    setState(() {
-      _isCalculating = false;
-      _routeMinutes = minutes;
-      _calmScore = calm;
-    });
-    widget.demoState.registerRoutePlanned();
-    if (_activePrompt == null) {
-      _scheduleNextPrompt(const Duration(seconds: 2));
+
+    if (routePoints.isEmpty) {
+      setState(() {
+        _isRouteLoading = false;
+      });
+      return;
     }
+
+    _routeProgressController?.dispose();
+    _routeProgressController = RouteProgressController(
+      mapController: mapController,
+      routePoints: routePoints,
+      metricsNotifier: _routeMetrics,
+      vsync: this,
+      totalDuration: _routeDuration,
+    );
+    await _routeProgressController?.initialize();
+    _routeProgressController?.start();
+
+    setState(() {
+      _isRouteLoading = false;
+      _routeStarted = true;
+    });
+  }
+
+  Future<MapLibreMapController> _awaitMapReady() async {
+    final controller = StableMapView.controllerNotifier.value;
+    if (controller != null && StableMapView.styleReadyNotifier.value) {
+      return controller;
+    }
+    final completer = Completer<MapLibreMapController>();
+    void listener() {
+      final readyController = StableMapView.controllerNotifier.value;
+      if (readyController != null && StableMapView.styleReadyNotifier.value) {
+        StableMapView.controllerNotifier.removeListener(listener);
+        StableMapView.styleReadyNotifier.removeListener(listener);
+        completer.complete(readyController);
+      }
+    }
+
+    StableMapView.controllerNotifier.addListener(listener);
+    StableMapView.styleReadyNotifier.addListener(listener);
+    return completer.future;
   }
 
   void _scheduleNextPrompt(Duration delay) {
@@ -607,7 +185,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         if (!mounted || _activePrompt == null) {
           return;
         }
-        _dismissPrompt(showMessage: false);
+        _dismissPrompt(showMessage: false, incrementConsent: true);
       });
     });
   }
@@ -618,18 +196,28 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       return;
     }
     widget.demoState.grant(prompt.id);
-    _dismissPrompt(showMessage: true);
+    _dismissPrompt(showMessage: true, incrementConsent: true);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Suggestion saved.')),
     );
   }
 
-  void _dismissPrompt({bool showMessage = true}) {
+  void _handleMaybeLater() {
+    _dismissPrompt(showMessage: false, incrementConsent: true);
+  }
+
+  void _dismissPrompt({
+    bool showMessage = true,
+    bool incrementConsent = false,
+  }) {
     if (_activePrompt == null) {
       return;
     }
     setState(() {
       _activePrompt = null;
+      if (incrementConsent) {
+        _consentCount += 1;
+      }
     });
     _autoAdvanceTimer?.cancel();
     if (showMessage) {
@@ -643,116 +231,293 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
     _scheduleNextPrompt(const Duration(seconds: 12));
   }
+}
 
-  void _toggleSystemOverview() {
-    setState(() {
-      _showSystemOverview = !_showSystemOverview;
-    });
+class DisturbanceHeatOverlay extends StatefulWidget {
+  const DisturbanceHeatOverlay({super.key});
+
+  @override
+  State<DisturbanceHeatOverlay> createState() => _DisturbanceHeatOverlayState();
+}
+
+class _DisturbanceHeatOverlayState extends State<DisturbanceHeatOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 8),
+    )..repeat(reverse: true);
   }
 
-  void _recenterMap() {
-    final controller = _mapController;
-    if (controller == null) {
-      return;
-    }
-    final target = _mapLoaded ? _simulatedLocation : _ljubljanaCenter;
-    controller.animateCamera(
-      CameraUpdate.newLatLngZoom(target, _defaultZoom),
-    );
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
   }
 
-  Future<void> _openDestinationSheet() async {
-    if (_isCalculating) {
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _pulseController,
+        builder: (context, _) {
+          return CustomPaint(
+            painter: _HeatmapPainter(pulse: _pulseController.value),
+          );
+        },
       ),
-      builder: (context) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: CozyTheme.ink.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                Text(
-                  'Destinations',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                ..._destinations.map((destination) {
-                  final subtitle = _destinationSubtitles[destination] ?? '';
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(destination),
-                      subtitle: Text(subtitle),
-                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        _selectDestination(destination);
-                      },
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
 
-class _ShimmerBar extends StatelessWidget {
-  final double progress;
+class CenterOverlayHost extends StatelessWidget {
+  final AccessItem? activePrompt;
+  final PrivacyPhase phase;
+  final VoidCallback onAllow;
+  final VoidCallback onContinue;
+  final VoidCallback onDismiss;
 
-  const _ShimmerBar({
-    required this.progress,
+  const CenterOverlayHost({
+    super.key,
+    required this.activePrompt,
+    required this.phase,
+    required this.onAllow,
+    required this.onContinue,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (activePrompt == null) {
+      return const SizedBox.shrink();
+    }
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: PermissionPrompt(
+          item: activePrompt!,
+          phase: phase,
+          onAllow: onAllow,
+          onContinue: onContinue,
+          onDismiss: onDismiss,
+        ),
+      ),
+    );
+  }
+}
+
+class BottomRouteCard extends StatelessWidget {
+  final bool isLoading;
+  final bool routeStarted;
+  final ValueNotifier<RouteMetrics> metricsNotifier;
+  final int consentCount;
+  final int totalConsents;
+  final int collectedSignals;
+  final VoidCallback onStartRoute;
+
+  const BottomRouteCard({
+    super.key,
+    required this.isLoading,
+    required this.routeStarted,
+    required this.metricsNotifier,
+    required this.consentCount,
+    required this.totalConsents,
+    required this.collectedSignals,
+    required this.onStartRoute,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        height: kRouteCardHeight,
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Quiet Route',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        _TwinIndicator(opacity: _twinOpacity()),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Ljubljana → Tivoli Park',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 10),
+                    ValueListenableBuilder<RouteMetrics>(
+                      valueListenable: metricsNotifier,
+                      builder: (context, metrics, _) {
+                        final minutes = max(1, metrics.remainingTime.inMinutes + 1);
+                        final distanceKm = metrics.remainingDistanceMeters / 1000;
+                        final distanceLabel = distanceKm > 0
+                            ? '${distanceKm.toStringAsFixed(1)} km'
+                            : '—';
+                        return Row(
+                          children: [
+                            _InfoChip(
+                              label: routeStarted ? '$minutes min' : 'ETA —',
+                              color: CozyTheme.mint,
+                            ),
+                            const SizedBox(width: 8),
+                            _InfoChip(
+                              label: routeStarted ? distanceLabel : 'Distance —',
+                              color: CozyTheme.lavender,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _BadgeChip(
+                          label: 'Consent: $consentCount/∞',
+                          color: CozyTheme.peach,
+                        ),
+                        const SizedBox(width: 8),
+                        _BadgeChip(
+                          label: 'Collected signals: $collectedSignals',
+                          color: CozyTheme.mint,
+                        ),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: isLoading ? null : onStartRoute,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: CozyTheme.ink,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: isLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Text('Start route'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _twinOpacity() {
+    if (totalConsents == 0) {
+      return 0.35;
+    }
+    return (0.35 + (consentCount / totalConsents) * 0.65).clamp(0.35, 1.0);
+  }
+}
+
+class _TwinIndicator extends StatelessWidget {
+  final double opacity;
+
+  const _TwinIndicator({required this.opacity});
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: opacity,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: CozyTheme.lavender.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Icon(Icons.auto_awesome_rounded, color: CozyTheme.ink),
+      ),
+    );
+  }
+}
+
+class _BadgeChip extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _BadgeChip({
+    required this.label,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 8,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: CozyTheme.cream,
-        borderRadius: BorderRadius.circular(12),
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Align(
-          alignment: Alignment(-1 + (progress * 2), 0),
-          child: Container(
-            width: 80,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.transparent,
-                  CozyTheme.lavender.withOpacity(0.6),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
-        ),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: CozyTheme.ink, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _InfoChip({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: CozyTheme.ink, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -789,62 +554,6 @@ class _HeatmapPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HeatmapPainter oldDelegate) {
     return oldDelegate.pulse != pulse;
-  }
-}
-
-class _RoutePainter extends CustomPainter {
-  final String? destination;
-  final bool showRoute;
-
-  const _RoutePainter({
-    required this.destination,
-    required this.showRoute,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (!showRoute || destination == null) {
-      return;
-    }
-    final paint = Paint()
-      ..color = CozyTheme.ink.withOpacity(0.25)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path()..moveTo(size.width * 0.18, size.height * 0.78);
-    if (destination == 'Tivoli Park') {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.2,
-          size.height * 0.45,
-          size.width * 0.18,
-          size.height * 0.22,
-        );
-    } else if (destination == 'Prešeren Square') {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.38,
-          size.height * 0.55,
-          size.width * 0.52,
-          size.height * 0.32,
-        );
-    } else {
-      path
-        ..quadraticBezierTo(
-          size.width * 0.45,
-          size.height * 0.6,
-          size.width * 0.78,
-          size.height * 0.62,
-        );
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _RoutePainter oldDelegate) {
-    return oldDelegate.destination != destination ||
-        oldDelegate.showRoute != showRoute;
   }
 }
 

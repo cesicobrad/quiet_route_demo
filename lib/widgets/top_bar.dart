@@ -8,9 +8,11 @@ class TopBar extends StatelessWidget {
 
   const TopBar({
     super.key,
-    required this.onSystemOverview,
-    required this.onDestinations,
+    this.onSystemOverview = _noop,
+    this.onDestinations = _noop,
   });
+
+  static void _noop() {}
 
   @override
   Widget build(BuildContext context) {
