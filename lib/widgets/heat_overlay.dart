@@ -76,16 +76,29 @@ class _HeatPainter extends CustomPainter {
       _HeatBlob(Offset(size.width * 0.62, size.height * 0.22), 110, 0.12, 1.0),
     ];
 
-    for (final blob in blobs) {
+    for (var i = 0; i < blobs.length; i++) {
+      final blob = blobs[i];
       final drift = Offset(
         sin((pulse * 2 * pi) + blob.phase) * 6,
         cos((pulse * 2 * pi) + blob.phase) * 6,
       );
       final intensity =
-          (blob.intensity + (pulse * 0.08)).clamp(0.08, 0.3);
+          (blob.intensity + (pulse * 0.08)).clamp(0.05, 0.28);
+      final colors = [
+        CozyTheme.peach.withOpacity(intensity * 0.9),
+        CozyTheme.lavender.withOpacity(intensity * 0.7),
+        CozyTheme.mint.withOpacity(intensity * 0.6),
+      ];
       final paint = Paint()
-        ..color = CozyTheme.peach.withOpacity(intensity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 70);
+        ..shader = RadialGradient(
+          colors: [
+            colors[i % colors.length],
+            Colors.transparent,
+          ],
+        ).createShader(
+          Rect.fromCircle(center: blob.center + drift, radius: blob.radius),
+        )
+        ..blendMode = BlendMode.plus;
       canvas.drawCircle(blob.center + drift, blob.radius, paint);
     }
   }
