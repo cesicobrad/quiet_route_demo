@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -55,6 +56,10 @@ class _MapScreenState extends State<MapScreen>
 
   int _lastRouteRequestId = 0;
   Line? _routeLine;
+  List<LatLng> _routePoints = [];
+  Timer? _gpsTimer;
+  int _gpsRouteIndex = 0;
+  Offset? _gpsScreenOffset;
 
   bool _destinationSheetOpen = false;
 
@@ -73,6 +78,7 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   void dispose() {
+    _gpsTimer?.cancel();
     widget.playbackState.removeListener(_handlePlaybackUpdates);
     super.dispose();
   }
@@ -106,13 +112,23 @@ class _MapScreenState extends State<MapScreen>
               Positioned.fill(
                 child: DisturbanceHeatOverlay(show: state.showHeat),
               ),
-              Align(
-                alignment: const Alignment(0, 0.55),
-                child: ScreenPinnedGpsPip(
-                  showTwin: state.showTwin,
-                  twinOpacity: state.twinOpacity,
+              if (_gpsScreenOffset == null)
+                Align(
+                  alignment: const Alignment(0, 0.55),
+                  child: ScreenPinnedGpsPip(
+                    showTwin: state.showTwin,
+                    twinOpacity: state.twinOpacity,
+                  ),
+                )
+              else
+                Positioned(
+                  left: _gpsScreenOffset!.dx - 8,
+                  top: _gpsScreenOffset!.dy - 8,
+                  child: ScreenPinnedGpsPip(
+                    showTwin: state.showTwin,
+                    twinOpacity: state.twinOpacity,
+                  ),
                 ),
-              ),
               SafeArea(
                 child: Column(
                   children: [
@@ -206,6 +222,32 @@ class _MapScreenState extends State<MapScreen>
       ),
     );
     _routeLine = line;
+    _routePoints = route;
+    _startGpsAnimation();
+  }
+
+  void _startGpsAnimation() {
+    _gpsTimer?.cancel();
+    if (_routePoints.length < 2 || _mapController == null) {
+      return;
+    }
+    _gpsRouteIndex = 0;
+    _gpsTimer = Timer.periodic(const Duration(milliseconds: 700), (_) async {
+      final controller = _mapController;
+      if (controller == null || _gpsRouteIndex >= _routePoints.length) {
+        _gpsTimer?.cancel();
+        return;
+      }
+      final point = _routePoints[_gpsRouteIndex];
+      final screenPoint = await controller.toScreenLocation(point);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _gpsScreenOffset = Offset(screenPoint.x.toDouble(), screenPoint.y.toDouble());
+      });
+      _gpsRouteIndex += 1;
+    });
   }
 
   Future<void> _openDestinationSheet() async {
