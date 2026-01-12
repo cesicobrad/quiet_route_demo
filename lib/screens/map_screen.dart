@@ -61,6 +61,8 @@ class _MapScreenState extends State<MapScreen>
   List<LatLng> _routePoints = [];
   final RouteProgressController _progressController =
       RouteProgressController();
+  LatLng? _routeStart;
+  Offset? _gpsScreenOffset;
 
   bool _destinationSheetOpen = false;
   bool _hasStartedRoute = false;
@@ -75,6 +77,7 @@ class _MapScreenState extends State<MapScreen>
       zoom: _defaultZoom,
       onMapCreated: _onMapCreated,
       onStyleLoaded: _onStyleLoaded,
+      onCameraIdle: _onCameraIdle,
     );
   }
 
@@ -91,6 +94,28 @@ class _MapScreenState extends State<MapScreen>
 
   void _onStyleLoaded() {
     _styleLoaded = true;
+  }
+
+  void _onCameraIdle() {
+    _updateGpsPipPosition();
+  }
+
+  Future<void> _updateGpsPipPosition() async {
+    final controller = _mapController;
+    final start = _routeStart;
+    if (controller == null || start == null) {
+      return;
+    }
+    final screenPoint = await controller.toScreenLocation(start);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _gpsScreenOffset = Offset(
+        screenPoint.x.toDouble(),
+        screenPoint.y.toDouble(),
+      );
+    });
   }
 
   void _handlePlaybackUpdates() {
@@ -118,17 +143,27 @@ class _MapScreenState extends State<MapScreen>
               Positioned.fill(
                 child: DisturbanceHeatOverlay(show: state.showHeat),
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: _routeCardHeight + 28,
-                child: Center(
+              if (_gpsScreenOffset != null)
+                Positioned(
+                  left: _gpsScreenOffset!.dx - 27,
+                  top: _gpsScreenOffset!.dy - 27,
                   child: ScreenPinnedGpsPip(
                     showTwin: state.showTwin,
                     twinOpacity: state.twinOpacity,
                   ),
+                )
+              else
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: _routeCardHeight + 28,
+                  child: Center(
+                    child: ScreenPinnedGpsPip(
+                      showTwin: state.showTwin,
+                      twinOpacity: state.twinOpacity,
+                    ),
+                  ),
                 ),
-              ),
               SafeArea(
                 child: Column(
                   children: [
@@ -227,6 +262,8 @@ class _MapScreenState extends State<MapScreen>
     );
     _routeLine = line;
     _routePoints = route;
+    _routeStart ??= route.first;
+    await _updateGpsPipPosition();
     _progressLine = await controller.addLine(
       LineOptions(
         geometry: route.take(2).toList(),
@@ -277,12 +314,14 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     _hasStartedRoute = true;
+    _routeStart = _startLocation;
     final controller = _mapController;
     if (controller != null) {
       await controller.animateCamera(
         CameraUpdate.newLatLngZoom(_startLocation, _defaultZoom),
       );
     }
+    await _updateGpsPipPosition();
     widget.playbackState.destination = 'Tivoli Park';
     widget.playbackState.bottomStatusText = 'Calculating route…';
     widget.playbackState.routeCalculating = true;
@@ -386,6 +425,7 @@ class _MapSurface extends StatelessWidget {
   final double zoom;
   final ValueChanged<MapLibreMapController> onMapCreated;
   final VoidCallback onStyleLoaded;
+  final VoidCallback onCameraIdle;
 
   const _MapSurface({
     required this.styleUrl,
@@ -393,6 +433,7 @@ class _MapSurface extends StatelessWidget {
     required this.zoom,
     required this.onMapCreated,
     required this.onStyleLoaded,
+    required this.onCameraIdle,
   });
 
   @override
@@ -408,6 +449,7 @@ class _MapSurface extends StatelessWidget {
         compassEnabled: false,
         onMapCreated: onMapCreated,
         onStyleLoadedCallback: onStyleLoaded,
+        onCameraIdle: onCameraIdle,
       ),
     );
   }
